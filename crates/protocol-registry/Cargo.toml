@@ -1,0 +1,13 @@
+[package]
+name = "umt-protocol-registry"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+umt-core = { workspace = true }
+umt-protocol-api = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+parking_lot = { workspace = true }

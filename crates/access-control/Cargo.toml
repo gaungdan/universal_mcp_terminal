@@ -1,0 +1,17 @@
+[package]
+name = "umt-access-control"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+umt-core = { workspace = true }
+umt-persistence = { workspace = true }
+umt-security = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+time = { workspace = true }

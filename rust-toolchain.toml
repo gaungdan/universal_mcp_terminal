@@ -1,0 +1,5 @@
+[toolchain]
+# 本机未安装 MSVC 构建工具（无 link.exe），项目统一使用 GNU 工具链。
+# 注意：不要改成 "stable" 默认 host（会解析到 msvc 导致链接失败）。
+channel = "stable-x86_64-pc-windows-gnu"
+components = ["rustfmt", "clippy"]

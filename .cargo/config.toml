@@ -1,0 +1,7 @@
+# 项目硬约束：本机内存有限，编译一律单并发，避免 OOM。
+# 参考 docs/development/multi-agent-execution-plan.md 第四节。
+[build]
+jobs = 1
+
+[net]
+retry = 3

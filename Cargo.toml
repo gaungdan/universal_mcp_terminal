@@ -1,0 +1,94 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/protocol-api",
+    "crates/protocol-registry",
+    "crates/providers/ssh",
+    "crates/providers/telnet",
+    "crates/providers/wsl",
+    "crates/session-manager",
+    "crates/mcp-server",
+    "crates/access-control",
+    "crates/audit",
+    "crates/persistence",
+    "crates/security",
+    "crates/app",
+    "apps/desktop/src-tauri",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+
+[workspace.dependencies]
+# ---- 内部 crate ----
+umt-core = { path = "crates/core" }
+umt-protocol-api = { path = "crates/protocol-api" }
+umt-protocol-registry = { path = "crates/protocol-registry" }
+umt-provider-ssh = { path = "crates/providers/ssh" }
+umt-provider-telnet = { path = "crates/providers/telnet" }
+umt-provider-wsl = { path = "crates/providers/wsl" }
+umt-session-manager = { path = "crates/session-manager" }
+umt-mcp-server = { path = "crates/mcp-server" }
+umt-access-control = { path = "crates/access-control" }
+umt-audit = { path = "crates/audit" }
+umt-persistence = { path = "crates/persistence" }
+umt-security = { path = "crates/security" }
+umt-app = { path = "crates/app" }
+
+# ---- 基础 ----
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+thiserror = "2.0.21"
+anyhow = "1.0.104"
+async-trait = "0.1.92"
+uuid = { version = "1.29.2", features = ["v4", "serde"] }
+schemars = "1.2.3"
+hex = "0.4.3"
+regex = "1.13.1"
+base64 = "0.23.1"
+time = { version = "0.3.55", features = ["serde"] }
+chrono = { version = "0.4.45", features = ["serde"] }
+
+# ---- 异步 ----
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util", "process", "signal"] }
+tokio-util = { version = "0.7.20", features = ["codec", "io"] }
+futures = "0.3.34"
+parking_lot = "0.13.0"
+dashmap = "6.2.1"
+bytes = "1.12.1"
+
+# ---- 日志 ----
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+
+# ---- 存储 ----
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros", "uuid", "chrono"] }
+
+# ---- 安全 ----
+aes-gcm = "0.11.1"
+hmac = "0.13.0"
+sha2 = "0.11.1"
+subtle = "2.6.1"
+zeroize = { version = "1.9.1", features = ["derive"] }
+rand = "0.10.3"
+keyring = { version = "4.2.0", features = ["windows-native-keyring-store"] }
+
+# ---- 协议 ----
+russh = "0.65.1"
+
+# ---- MCP ----
+rmcp = { version = "3.9.0", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
+axum = "0.8.9"
+tower = "0.5.3"
+http = "1.5.0"
+
+# ---- 桌面 ----
+tauri = "2.12.5"
+tauri-build = "2.7.4"
+
+# ---- 平台 ----
+windows-sys = "0.61.2"

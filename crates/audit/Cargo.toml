@@ -1,0 +1,19 @@
+[package]
+name = "umt-audit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+umt-core = { workspace = true }
+umt-persistence = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+regex = { workspace = true }
+time = { workspace = true }
+hex = { workspace = true }
+sha2 = { workspace = true }

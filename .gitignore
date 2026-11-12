@@ -1,0 +1,31 @@
+# ---- Rust ----
+/target
+**/*.rs.bk
+
+# ---- 前端 ----
+node_modules/
+frontend/dist/
+apps/desktop/dist/
+dist/
+*.local
+
+# ---- Tauri 生成物 ----
+apps/desktop/src-tauri/gen/schemas/
+
+# ---- 本地数据与备份（含旧版凭据，禁止入库）----
+backup/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.umtrec
+audit.key
+ipc.token
+.env
+
+# ---- 工具链 ----
+.tmp-probe/
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

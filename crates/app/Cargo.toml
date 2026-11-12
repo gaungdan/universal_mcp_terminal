@@ -1,0 +1,31 @@
+[package]
+name = "umt-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+umt-core = { workspace = true }
+umt-protocol-api = { workspace = true }
+umt-protocol-registry = { workspace = true }
+umt-provider-ssh = { workspace = true }
+umt-provider-telnet = { workspace = true }
+umt-provider-wsl = { workspace = true }
+umt-session-manager = { workspace = true }
+umt-mcp-server = { workspace = true }
+umt-access-control = { workspace = true }
+umt-audit = { workspace = true }
+umt-persistence = { workspace = true }
+umt-security = { workspace = true }
+tauri = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+time = { workspace = true }
