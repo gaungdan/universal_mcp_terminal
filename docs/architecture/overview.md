@@ -76,7 +76,7 @@ graph TD
 
 ```text
 AI 客户端
-  │  POST http://127.0.0.1:17321/mcp
+  │  POST http://127.0.0.1:47321/mcp
   │  Authorization: Bearer umt_xxxxxxxx_<64 hex>
   ▼
 rmcp StreamableHttpService（axum 挂在 /mcp）

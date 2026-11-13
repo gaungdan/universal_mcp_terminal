@@ -119,7 +119,7 @@ src/pages/connections/ConnectionsPage.test 10
 | 4 | 过期 Token 被拒绝 | **已覆盖** | `disabled_and_expired_tokens_are_rejected` |
 | 5 | 已撤销 Token 被拒绝 | **已覆盖** | e2e `revoked_token_is_rejected_on_next_call` + 单测 |
 | 6 | 未授权连接无法访问 | **已覆盖** | e2e 越权矩阵 + `AccessControl` 单测 |
-| 7 | MCP 默认仅监听本机地址 | **已覆盖** | `McpServerConfig::default()` 为 `127.0.0.1:17321`；启动测试绑定 `127.0.0.1` |
+| 7 | MCP 默认仅监听本机地址 | **已覆盖** | `McpServerConfig::default()` 为 `127.0.0.1:47321`；启动测试绑定 `127.0.0.1` |
 
 ### 3.5 审计
 

@@ -40,7 +40,7 @@ mod tests {
     fn event_serializes_with_type_tag() {
         let event = AppEvent::McpServerStateChanged {
             running: true,
-            endpoint: Some("http://127.0.0.1:17321/mcp".into()),
+            endpoint: Some("http://127.0.0.1:47321/mcp".into()),
         };
         let json = serde_json::to_value(&event).expect("序列化失败");
         assert_eq!(json["type"], "mcp_server_state_changed");

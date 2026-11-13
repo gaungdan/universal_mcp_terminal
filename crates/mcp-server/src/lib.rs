@@ -24,3 +24,6 @@ pub use deps::{ConnectionConfigSource, McpDeps};
 pub use handler::{UmtMcpServer, parse_bearer};
 pub use service::{McpServer, McpServerConfig, McpStatus};
 pub use tools::{TOOL_NAMES, tool_definitions};
+
+/// MCP 默认端口。选高位、非常用端口，降低与其他本机软件冲突的概率。
+pub const DEFAULT_PORT: u16 = 47321;

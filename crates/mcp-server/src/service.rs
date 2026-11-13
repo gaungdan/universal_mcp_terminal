@@ -31,7 +31,7 @@ impl Default for McpServerConfig {
     fn default() -> Self {
         Self {
             host: "127.0.0.1".into(),
-            port: 17321,
+            port: crate::DEFAULT_PORT,
         }
     }
 }

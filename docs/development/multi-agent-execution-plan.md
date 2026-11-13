@@ -182,7 +182,7 @@ import_log(id INTEGER PK AUTOINCREMENT, source_path TEXT NOT NULL, source_sha256
 
 | 工单 | 内容 | 依赖 | 独占写入 | 验收 |
 |---|---|---|---|---|
-| **T13** MCP Server | rmcp streamable-http、Bearer 中间件、`127.0.0.1:17321/mcp`、端口占用检测、7 个工具、能力校验、结构化结果 | T10,T11,T12 | `crates/mcp-server/**` | 用官方 MCP 客户端（或 `mcp-inspector`）跑通 7 个工具；未认证/过期/越权三类拒绝用例 |
+| **T13** MCP Server | rmcp streamable-http、Bearer 中间件、`127.0.0.1:47321/mcp`、端口占用检测、7 个工具、能力校验、结构化结果 | T10,T11,T12 | `crates/mcp-server/**` | 用官方 MCP 客户端（或 `mcp-inspector`）跑通 7 个工具；未认证/过期/越权三类拒绝用例 |
 | **T14** App 层接线 | Tauri commands 实现 T5 契约、启动初始化顺序（DB→迁移→Registry→Provider 注册→MCP 自动启动策略）、日志、托管状态 | T5,T6,T10,T11,T12,T13 | `crates/app/src/{commands,state,setup}.rs`、`apps/desktop/src-tauri` | `cargo tauri dev` 可启动，前端可拿到真实数据 |
 | **T15** 前端基座 | 路由、布局、设计系统、`SchemaForm` 动态表单渲染器、统一请求封装与错误提示 | T5 | `apps/desktop/src/{layout,components,lib}/**` | typecheck/lint/test/build 全绿；SchemaForm 单测覆盖 5 种字段类型 |
 | **T16** 连接管理页 | 列表/筛选/创建/编辑/删除/复制/测试/启停/详情；表单完全由 Schema 驱动 | T15 | `apps/desktop/src/pages/connections/**` | 手工验收清单 + 组件测试 |

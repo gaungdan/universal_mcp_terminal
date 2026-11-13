@@ -35,14 +35,14 @@ Windows 凭据管理器（service：`com.universal-mcp-terminal`）。
 
 ## MCP 接入
 
-默认地址：`http://127.0.0.1:17321/mcp`（Streamable HTTP，仅监听回环地址）。
+默认地址：`http://127.0.0.1:47321/mcp`（Streamable HTTP，仅监听回环地址）。
 
 ```json
 {
   "mcpServers": {
     "universal-mcp-terminal": {
       "transport": "streamable-http",
-      "url": "http://127.0.0.1:17321/mcp",
+      "url": "http://127.0.0.1:47321/mcp",
       "headers": {
         "Authorization": "Bearer YOUR_ACCESS_TOKEN"
       }

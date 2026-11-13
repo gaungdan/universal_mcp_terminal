@@ -26,8 +26,8 @@ use crate::services::store::{ConnectionConfigStore, McpConnectionSource};
 pub const DEFAULT_DB_FILE: &str = "umt-v2.db";
 /// MCP 默认监听地址。
 pub const DEFAULT_MCP_HOST: &str = "127.0.0.1";
-/// MCP 默认端口。
-pub const DEFAULT_MCP_PORT: u16 = 17321;
+/// 默认端口。选一个不常被其他软件占用的高位端口（历史上是 17321，本机与其他软件冲突）。
+pub const DEFAULT_MCP_PORT: u16 = 47321;
 /// 默认空闲会话超时（秒）。
 pub const DEFAULT_SESSION_TIMEOUT_SECS: u64 = 1800;
 
@@ -274,6 +274,12 @@ async fn seed_defaults(repos: &SqliteRepos) -> Result<(), UmtError> {
         if repos.settings.get(key).await?.is_none() {
             repos.settings.set(key, &value).await?;
         }
+    }
+    // 旧的默认/临时端口（17321、17322）容易与其他本机软件冲突，启动时一次性切到新默认值。
+    let current_port = repos.settings.get(KEY_MCP_PORT).await?;
+    if matches!(current_port.as_deref(), Some("17321") | Some("17322")) {
+        let port = DEFAULT_MCP_PORT.to_string();
+        repos.settings.set(KEY_MCP_PORT, &port).await?;
     }
     Ok(())
 }
