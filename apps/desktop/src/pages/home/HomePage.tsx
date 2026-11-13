@@ -3,16 +3,13 @@ import type { FormEvent } from "react";
 import {
   createToken,
   getOverview,
-  listConnections,
-  listTokenGrants,
+  getTokenMcpConfig,
   listTokens,
-  setTokenGrant,
   startMcp,
   stopMcp,
 } from "../../api/client";
 import type {
   CreatedTokenDto,
-  GrantDto,
   McpStatusDto,
   TokenDto,
 } from "../../api/types";
@@ -24,14 +21,11 @@ import { useAsync } from "../../lib/useAsync";
 import { auditKindLabel, auditOutcomeLabel, summarizeCommand } from "../audit/audit";
 import {
   buildAiPrompt,
-  buildMaskedMcpConfig,
-  buildMcpConfig,
   maskTokenPrefix,
 } from "./home";
 import "./home.css";
 
 const TOKEN_PAGE_SIZE = 50;
-const CONNECTION_PAGE_SIZE = 100;
 const RECENT_AUDIT_LIMIT = 5;
 
 type Feedback = {
@@ -60,17 +54,6 @@ function StepStatus({ done }: { done: boolean }) {
 export default function HomePage() {
   const overviewQuery = useAsync(() => getOverview(), []);
   const tokensQuery = useAsync(() => listTokens({ offset: 0, limit: TOKEN_PAGE_SIZE }), []);
-  const connectionsQuery = useAsync(
-    () =>
-      listConnections({
-        offset: 0,
-        limit: CONNECTION_PAGE_SIZE,
-        protocolId: null,
-        enabled: null,
-        search: null,
-      }),
-    [],
-  );
 
   const [mcpOverride, setMcpOverride] = useState<McpStatusDto | null>(null);
   const [mcpBusy, setMcpBusy] = useState(false);
@@ -81,79 +64,59 @@ export default function HomePage() {
   const [tokenNameError, setTokenNameError] = useState<string | null>(null);
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
-  const [plaintextVisible, setPlaintextVisible] = useState(false);
 
-  const [grantOverrides, setGrantOverrides] = useState<Record<string, GrantDto>>({});
-  const [grantError, setGrantError] = useState<string | null>(null);
-  const [savingGrantId, setSavingGrantId] = useState<string | null>(null);
-
-  const [pastedToken, setPastedToken] = useState("");
-  const [configTokenVisible, setConfigTokenVisible] = useState(false);
+  const [selectedTokenId, setSelectedTokenId] = useState<string | null>(null);
   const [configCopied, setConfigCopied] = useState(false);
   const [promptCopied, setPromptCopied] = useState(false);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
 
   const overview = overviewQuery.data;
-  const tokens = tokensQuery.data?.items ?? [];
-  const connections = useMemo(
-    () => connectionsQuery.data?.items ?? [],
-    [connectionsQuery.data],
-  );
+  const tokens = useMemo(() => tokensQuery.data?.items ?? [], [tokensQuery.data]);
   const mcp = mcpOverride ?? overview?.mcp ?? null;
 
-  const currentToken: TokenDto | null =
-    created?.token ??
-    tokens.find((token) => token.status === "active") ??
-    tokens[0] ??
-    null;
+  const currentToken: TokenDto | null = created?.token ?? tokens[0] ?? null;
 
-  const grantsQuery = useAsync(
-    () =>
-      currentToken
-        ? listTokenGrants(currentToken.id)
-        : Promise.resolve<GrantDto[]>([]),
-    [currentToken?.id ?? ""],
-  );
-
-  const grantRows = useMemo(() => {
-    const baseGrants = new Map<string, GrantDto>();
-    for (const grant of grantsQuery.data ?? []) {
-      baseGrants.set(grant.connection.id, grant);
-    }
-    return connections.map((connection) => {
-      const base: GrantDto =
-        baseGrants.get(connection.id) ?? {
-          connection,
-          allowed: false,
-          grantedAt: null,
-        };
-      const overridden = currentToken
-        ? grantOverrides[`${currentToken.id}:${connection.id}`]
-        : undefined;
-      return overridden ?? base;
+  const tokenOptions = useMemo(() => {
+    const base = created ? [created.token, ...tokens] : tokens;
+    const seen = new Set<string>();
+    return base.filter((token) => {
+      if (seen.has(token.id)) {
+        return false;
+      }
+      seen.add(token.id);
+      return true;
     });
-  }, [connections, grantsQuery.data, grantOverrides, currentToken]);
+  }, [created, tokens]);
+
+  const selectedToken: TokenDto | null = useMemo(
+    () =>
+      tokenOptions.find((token) => token.id === selectedTokenId) ??
+      tokenOptions[0] ??
+      null,
+    [tokenOptions, selectedTokenId],
+  );
 
   const recentAudits = overview?.recentAudits.slice(0, RECENT_AUDIT_LIMIT) ?? [];
-  const endpoint = mcp?.endpoint ?? "";
-  const tokenSecret = created?.plaintext ?? pastedToken.trim();
 
-  const configText = useMemo(
-    () => (endpoint && tokenSecret ? buildMcpConfig(endpoint, tokenSecret) : ""),
-    [endpoint, tokenSecret],
+  const configQuery = useAsync(
+    () =>
+      selectedToken
+        ? getTokenMcpConfig(selectedToken.id)
+        : Promise.resolve(""),
+    [selectedToken?.id ?? ""],
   );
-  const maskedConfigText = useMemo(() => buildMaskedMcpConfig(endpoint), [endpoint]);
+  const configText = configQuery.loading ? "" : (configQuery.data ?? "");
+  const configError = configQuery.error ? toUserMessage(configQuery.error) : null;
   const promptText = useMemo(
-    () => (endpoint ? buildAiPrompt(endpoint) : ""),
-    [endpoint],
+    () => (configText ? buildAiPrompt(configText) : ""),
+    [configText],
   );
 
   const step1Done = mcp?.running === true;
   const step2Done = (overview?.tokenCount ?? 0) > 0 || created !== null;
-  const step3Done = grantRows.some((grant) => grant.allowed);
-  const step4Done = configCopied;
-  const step5Done = promptCopied;
-  const completedSteps = [step1Done, step2Done, step3Done, step4Done, step5Done].filter(
+  const step3Done = configCopied;
+  const step4Done = promptCopied;
+  const completedSteps = [step1Done, step2Done, step3Done, step4Done].filter(
     Boolean,
   ).length;
 
@@ -198,8 +161,10 @@ export default function HomePage() {
     try {
       const result = await createToken({ name });
       setCreated(result);
+      setSelectedTokenId(result.token.id);
       setTokenName("");
-      setPlaintextVisible(false);
+      setConfigCopied(false);
+      setPromptCopied(false);
       overviewQuery.reload();
       tokensQuery.reload();
     } catch (error) {
@@ -209,43 +174,10 @@ export default function HomePage() {
     }
   };
 
-  const handleToggleGrant = async (grant: GrantDto) => {
-    if (!currentToken) {
-      return;
-    }
-    const connectionId = grant.connection.id;
-    const nextAllowed = !grant.allowed;
-    const key = `${currentToken.id}:${connectionId}`;
-    setGrantError(null);
-    setGrantOverrides((previous) => ({
-      ...previous,
-      [key]: {
-        ...grant,
-        allowed: nextAllowed,
-        grantedAt: nextAllowed ? Date.now() : null,
-      },
-    }));
-    setSavingGrantId(connectionId);
-    try {
-      const updated = await setTokenGrant({
-        tokenId: currentToken.id,
-        connectionId,
-        allowed: nextAllowed,
-      });
-      setGrantOverrides((previous) => ({ ...previous, [key]: updated }));
-    } catch (error) {
-      setGrantOverrides((previous) => {
-        if (!Object.hasOwn(previous, key)) {
-          return previous;
-        }
-        const next = { ...previous };
-        delete next[key];
-        return next;
-      });
-      setGrantError(toUserMessage(error));
-    } finally {
-      setSavingGrantId(null);
-    }
+  const handleSelectToken = (tokenId: string) => {
+    setSelectedTokenId(tokenId);
+    setConfigCopied(false);
+    setPromptCopied(false);
   };
 
   const handleCopyConfig = async () => {
@@ -268,20 +200,6 @@ export default function HomePage() {
     }
   };
 
-  const handleCopyPlaintext = async () => {
-    if (!created) {
-      return;
-    }
-    await copyText(created.plaintext, "Token 已复制到剪贴板。");
-  };
-
-  const handleRegenerate = () => {
-    setConfigCopied(false);
-    setConfigTokenVisible(false);
-    overviewQuery.reload();
-    tokensQuery.reload();
-  };
-
   const startDisabled = mcp === null || mcp.running || mcpBusy;
   const stopDisabled = mcp === null || !mcp.running || mcpBusy;
 
@@ -290,9 +208,9 @@ export default function HomePage() {
       <header className="home__header">
         <div>
           <h1>首页</h1>
-          <p>查看运行概览，并按 5 个步骤把 MCP Server 接入其他 AI 客户端。</p>
+          <p>查看运行概览，并按 4 个步骤把 MCP Server 接入其他 AI 客户端。</p>
         </div>
-        <span className="home__progress">已完成 {completedSteps} / 5 步</span>
+        <span className="home__progress">已完成 {completedSteps} / 4 步</span>
       </header>
 
       <p
@@ -395,267 +313,179 @@ export default function HomePage() {
 
       <SectionCard
         title="快速开始"
-        description="步骤状态由当前真实数据推导，完成后即可在 AI 客户端中使用。"
+        description="按 4 个步骤完成接入，复制提示词后交给 AI 客户端即可。"
       >
         <ol className="quickstart">
           <li className="quickstart__step">
             <div className="quickstart__head">
-              <h3>启动 MCP Server</h3>
+              <span className="quickstart__index">1</span>
+              <h3>启动 MCP</h3>
               <StepStatus done={step1Done} />
             </div>
             <p className="quickstart__text">
-              当前服务地址：
               <code>{mcp?.endpoint ?? "加载中…"}</code>
             </p>
             <div className="home__actions">
-              <button
-                type="button"
-                className="btn btn--primary btn--small"
-                onClick={() => void handleToggleMcp()}
-                disabled={startDisabled}
-              >
-                启动 MCP Server
-              </button>
-              <button
-                type="button"
-                className="btn btn--ghost btn--small"
-                onClick={() => void handleToggleMcp()}
-                disabled={stopDisabled}
-              >
-                停止 MCP Server
-              </button>
+              {mcp?.running ? (
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--small"
+                  onClick={() => void handleToggleMcp()}
+                  disabled={stopDisabled}
+                >
+                  停止 MCP
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn--primary btn--small"
+                  onClick={() => void handleToggleMcp()}
+                  disabled={startDisabled}
+                >
+                  启动 MCP
+                </button>
+              )}
             </div>
           </li>
 
           <li className="quickstart__step">
             <div className="quickstart__head">
-              <h3>创建访问 Token</h3>
+              <span className="quickstart__index">2</span>
+              <h3>创建 Token</h3>
               <StepStatus done={step2Done} />
             </div>
 
-            {step2Done && currentToken ? (
+            {created && currentToken ? (
               <>
                 <p className="quickstart__text">
-                  当前 Token：<strong>{currentToken.name}</strong>{" "}
+                  <strong>{currentToken.name}</strong>{" "}
                   <code>{maskTokenPrefix(currentToken.prefix)}</code>
                 </p>
-                {created ? (
-                  <>
-                    <div className="home__notice home__notice--warning" role="note">
-                      此 Token 明文仅显示一次，请立即复制并妥善保存；离开本页后将无法再次查看。
-                    </div>
-                    <div className="home__token-row">
-                      <code className="home__token-plaintext" data-testid="created-token-plaintext">
-                        {plaintextVisible ? created.plaintext : "••••••••••••••••"}
-                      </code>
-                      <button
-                        type="button"
-                        className="btn btn--ghost btn--small"
-                        aria-pressed={plaintextVisible}
-                        onClick={() => setPlaintextVisible((visible) => !visible)}
-                      >
-                        {plaintextVisible ? "隐藏 Token" : "显示 Token"}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn--ghost btn--small"
-                        onClick={() => void handleCopyPlaintext()}
-                      >
-                        复制 Token
-                      </button>
-                    </div>
-                  </>
-                ) : (
-                  <p className="quickstart__text">
-                    Token 明文仅在创建时显示一次。如需重新获取明文，请前往{" "}
-                    <a href="#/access-control">访问控制</a> 重新创建。
-                  </p>
-                )}
+                <div className="home__notice home__notice--warning" role="note">
+                  Token 已创建，第 3 步会自动生成对应的配置和提示词。
+                </div>
               </>
             ) : (
-              <form className="quickstart__form" onSubmit={(event) => void handleCreateToken(event)}>
-                <p className="quickstart__text">
-                  还没有访问 Token。创建一个后即可授权连接并生成 MCP 配置。
-                  <a href="#/access-control">前往访问控制</a>
-                </p>
-                <div className="form-field">
-                  <label
-                    className="form-field__label form-field__label--required"
-                    htmlFor="home-token-name"
-                  >
-                    Token 名称
-                  </label>
-                  <input
-                    id="home-token-name"
-                    className="form-field__control"
-                    value={tokenName}
-                    placeholder="例如：Claude Code"
-                    onChange={(event) => {
-                      setTokenName(event.target.value);
-                      if (tokenNameError) {
-                        setTokenNameError(null);
-                      }
-                    }}
-                  />
-                  {tokenNameError ? (
-                    <p className="form-field__error" role="alert">
-                      {tokenNameError}
-                    </p>
-                  ) : null}
-                </div>
-                <div className="home__actions">
-                  <button type="submit" className="btn btn--primary" disabled={createBusy}>
-                    {createBusy ? "创建中…" : "创建 Token"}
-                  </button>
-                </div>
-                {createError ? (
-                  <p className="home__alert home__alert--danger" role="alert">
-                    {createError}
+              <>
+                {currentToken ? (
+                  <p className="quickstart__text">
+                    已有 {tokens.length} 个 Token，可直接在第 3 步选择；也可以新建一个：
                   </p>
                 ) : null}
-              </form>
+                <form onSubmit={(event) => void handleCreateToken(event)}>
+                  <div className="form-field">
+                    <label
+                      className="form-field__label form-field__label--required"
+                      htmlFor="home-token-name"
+                    >
+                      Token 名称
+                    </label>
+                    <input
+                      id="home-token-name"
+                      className="form-field__control"
+                      value={tokenName}
+                      placeholder="例如：Claude Code"
+                      onChange={(event) => {
+                        setTokenName(event.target.value);
+                        if (tokenNameError) {
+                          setTokenNameError(null);
+                        }
+                      }}
+                    />
+                    {tokenNameError ? (
+                      <p className="form-field__error" role="alert">
+                        {tokenNameError}
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="home__actions">
+                    <button type="submit" className="btn btn--primary btn--small" disabled={createBusy}>
+                      {createBusy ? "创建中…" : "创建 Token"}
+                    </button>
+                  </div>
+                  {createError ? (
+                    <p className="home__alert home__alert--danger" role="alert">
+                      {createError}
+                    </p>
+                  ) : null}
+                </form>
+              </>
             )}
           </li>
 
           <li className="quickstart__step">
             <div className="quickstart__head">
-              <h3>授权连接</h3>
+              <span className="quickstart__index">3</span>
+              <h3>选择访问 Token</h3>
               <StepStatus done={step3Done} />
             </div>
 
-            {!currentToken ? (
-              <p className="quickstart__text">请先完成第 2 步，创建可用的访问 Token。</p>
+            {!selectedToken ? (
+              <p className="quickstart__text">请先完成第 2 步，创建访问 Token。</p>
             ) : (
               <>
-                <p className="quickstart__text">
-                  为 Token「{currentToken.name}」选择允许 AI 使用的连接，开关与访问控制页面保持一致。
-                </p>
-                {grantError ? (
-                  <p className="home__alert home__alert--danger" role="alert">
-                    {grantError}
-                  </p>
-                ) : null}
-                {connectionsQuery.error ? (
-                  <p className="home__alert home__alert--danger" role="alert">
-                    {toUserMessage(connectionsQuery.error)}
-                  </p>
-                ) : null}
-                {connections.length === 0 && !connectionsQuery.loading ? (
-                  <EmptyState
-                    title="还没有连接"
-                    description="先在连接管理中创建连接，再回到这里授权给 Token。"
-                    action={<a href="#/connections">前往连接管理</a>}
-                  />
-                ) : null}
-                {grantRows.length > 0 ? (
-                  <ul className="home__grant-list">
-                    {grantRows.map((grant) => (
-                      <li className="home__grant-item" key={grant.connection.id}>
-                        <span className="home__grant-name">{grant.connection.name}</span>
-                        <span className="home__grant-protocol">
-                          {grant.connection.protocolDisplayName}
-                        </span>
-                        <label className="home__grant-toggle">
-                          <input
-                            type="checkbox"
-                            role="switch"
-                            aria-label={`授权 ${grant.connection.name}`}
-                            checked={grant.allowed}
-                            disabled={savingGrantId !== null}
-                            onChange={() => void handleToggleGrant(grant)}
-                          />
-                          <span>{grant.allowed ? "已授权" : "未授权"}</span>
-                        </label>
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-              </>
-            )}
-          </li>
-
-          <li className="quickstart__step">
-            <div className="quickstart__head">
-              <h3>复制 MCP 配置</h3>
-              <StepStatus done={step4Done} />
-            </div>
-
-            {tokenSecret === "" ? (
-              <>
-                <div className="home__notice home__notice--warning" role="note">
-                  当前没有可用的 Token 明文（明文仅在创建时显示一次）。请前往{" "}
-                  <a href="#/access-control">访问控制</a> 重新创建 Token，或在下方粘贴已有的
-                  Token；不会展示或生成伪造 Token。
-                </div>
                 <div className="form-field">
-                  <label className="form-field__label" htmlFor="home-paste-token">
-                    粘贴 Token 明文
+                  <label className="form-field__label" htmlFor="home-token-select">
+                    选择访问 Token
                   </label>
-                  <input
-                    id="home-paste-token"
+                  <select
+                    id="home-token-select"
                     className="form-field__control"
-                    value={pastedToken}
-                    autoComplete="off"
-                    spellCheck={false}
-                    placeholder="umt_..."
-                    onChange={(event) => setPastedToken(event.target.value)}
-                  />
+                    value={selectedToken.id}
+                    onChange={(event) => handleSelectToken(event.target.value)}
+                  >
+                    {tokenOptions.map((token) => (
+                      <option key={token.id} value={token.id}>
+                        {token.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-              </>
-            ) : (
-              <>
-                {created === null && pastedToken.trim() !== "" ? (
-                  <p className="quickstart__text">
-                    正在使用手动粘贴的 Token，请确认其来源与有效性。
+
+                {configError ? (
+                  <p className="home__alert home__alert--danger" role="alert">
+                    {configError}
                   </p>
                 ) : null}
+
                 <pre className="home__code">
                   <code data-testid="mcp-config">
-                    {configTokenVisible ? configText : maskedConfigText}
+                    {configQuery.loading
+                      ? "正在生成配置…"
+                      : configError
+                        ? "无法生成配置"
+                        : configText}
                   </code>
                 </pre>
+
+                <div className="home__actions">
+                  <button
+                    type="button"
+                    className="btn btn--primary btn--small"
+                    onClick={() => void handleCopyConfig()}
+                    disabled={configText === ""}
+                  >
+                    复制配置
+                  </button>
+                </div>
               </>
             )}
-
-            <div className="home__actions">
-              <button
-                type="button"
-                className="btn btn--ghost btn--small"
-                aria-pressed={configTokenVisible}
-                onClick={() => setConfigTokenVisible((visible) => !visible)}
-                disabled={tokenSecret === ""}
-              >
-                {configTokenVisible ? "隐藏 Token" : "显示 Token"}
-              </button>
-              <button
-                type="button"
-                className="btn btn--primary btn--small"
-                onClick={() => void handleCopyConfig()}
-                disabled={configText === ""}
-              >
-                复制配置
-              </button>
-              <button
-                type="button"
-                className="btn btn--ghost btn--small"
-                onClick={handleRegenerate}
-              >
-                重新生成配置
-              </button>
-            </div>
           </li>
 
           <li className="quickstart__step">
             <div className="quickstart__head">
-              <h3>复制 AI 接入提示词</h3>
-              <StepStatus done={step5Done} />
+              <span className="quickstart__index">4</span>
+              <h3>复制提示词</h3>
+              <StepStatus done={step4Done} />
             </div>
             <p className="quickstart__text">
-              提示词只包含服务地址与操作规则，不包含真实 Token，可安全粘贴给 AI 客户端。
+              提示词已包含第 3 步生成的 MCP 配置，AI 接入后会自行探索可用工具。
             </p>
             <pre className="home__code home__code--prompt">
               <code data-testid="ai-prompt">
-                {promptText === "" ? "正在获取 MCP 服务地址…" : promptText}
+                {promptText === ""
+                  ? "请先在第 3 步选择 Token 并生成配置。"
+                  : promptText}
               </code>
             </pre>
             <div className="home__actions">

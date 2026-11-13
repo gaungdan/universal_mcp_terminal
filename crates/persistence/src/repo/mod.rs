@@ -115,6 +115,12 @@ pub trait TokenRepo: Send + Sync {
     async fn count(&self) -> Result<u64, PersistenceError>;
 
     async fn delete(&self, id: TokenId) -> Result<bool, PersistenceError>;
+
+    /// 保存 Token 明文的加密副本，用于在本机生成 MCP 配置。
+    async fn put_secret(&self, id: TokenId, secret: SecretBlob) -> Result<(), PersistenceError>;
+
+    /// 读取 Token 明文的加密副本；旧版本创建的 Token 没有此记录。
+    async fn get_secret(&self, id: TokenId) -> Result<Option<SecretBlob>, PersistenceError>;
 }
 
 /// Token 与 Connection 的多对多授权。

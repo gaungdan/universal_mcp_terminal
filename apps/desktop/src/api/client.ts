@@ -107,6 +107,10 @@ export function createToken(input: CreateTokenInput): Promise<CreatedTokenDto> {
   return invoke<CreatedTokenDto>("create_token", { input });
 }
 
+export function getTokenMcpConfig(tokenId: string): Promise<string> {
+  return invoke<string>("get_token_mcp_config", { tokenId });
+}
+
 export function updateToken(input: UpdateTokenInput): Promise<TokenDto> {
   return invoke<TokenDto>("update_token", { input });
 }

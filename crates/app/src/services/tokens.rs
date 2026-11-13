@@ -92,6 +92,33 @@ pub async fn delete(state: &AppState, id: &str) -> Result<bool, UmtError> {
     state.access.delete_token(token_id).await
 }
 
+/// 按 Token 生成可直接粘贴到 AI 客户端的 MCP 配置。
+///
+/// 明文取自创建时保存的加密副本，旧版本创建的 Token 没有副本，需要重新创建。
+pub async fn mcp_config(state: &AppState, token_id: &str) -> Result<String, UmtError> {
+    let token_id = crate::services::parse_id::<TokenId>(token_id, "Token")?;
+    state.access.get_token(token_id).await?;
+    let secret = state.access.token_secret(token_id).await?.ok_or_else(|| {
+        UmtError::Validation("该 Token 创建于旧版本，无法获取密钥，请在访问控制中重新创建".into())
+    })?;
+
+    let config = crate::services::state::read_mcp_config(&state.repos).await?;
+    let endpoint = format!("http://{}:{}/mcp", config.host, config.port);
+    let value = serde_json::json!({
+        "mcpServers": {
+            "universal-mcp-terminal": {
+                "transport": "streamable-http",
+                "url": endpoint,
+                "headers": {
+                    "Authorization": format!("Bearer {secret}")
+                }
+            }
+        }
+    });
+    serde_json::to_string_pretty(&value)
+        .map_err(|_| UmtError::Internal("MCP 配置无法序列化".into()))
+}
+
 pub async fn list_grants(state: &AppState, token_id: &str) -> Result<Vec<GrantDto>, UmtError> {
     let token_id = crate::services::parse_id::<TokenId>(token_id, "Token")?;
     let grants = state.access.list_grants(token_id).await?;

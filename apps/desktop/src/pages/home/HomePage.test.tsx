@@ -2,8 +2,6 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AuditDto,
-  ConnectionDto,
-  GrantDto,
   McpStatusDto,
   OverviewDto,
   TokenDto,
@@ -16,42 +14,37 @@ const api = vi.hoisted(() => ({
   stopMcp: vi.fn(),
   listTokens: vi.fn(),
   createToken: vi.fn(),
-  listConnections: vi.fn(),
-  listTokenGrants: vi.fn(),
-  setTokenGrant: vi.fn(),
+  getTokenMcpConfig: vi.fn(),
 }));
 
 vi.mock("../../api/client", () => api);
 
-const ENDPOINT = "http://127.0.0.1:17321/mcp";
+const ENDPOINT = "http://127.0.0.1:47321/mcp";
 const PLAINTEXT = "umt_newpre_plaintext";
+
+function makeConfig(secret: string): string {
+  return [
+    "{",
+    '  "mcpServers": {',
+    '    "universal-mcp-terminal": {',
+    '      "transport": "streamable-http",',
+    `      "url": "${ENDPOINT}",`,
+    '      "headers": {',
+    `        "Authorization": "Bearer ${secret}"`,
+    "      }",
+    "    }",
+    "  }",
+    "}",
+  ].join("\n");
+}
 
 function makeMcp(overrides: Partial<McpStatusDto> = {}): McpStatusDto {
   return {
     running: false,
     host: "127.0.0.1",
-    port: 17321,
+    port: 47321,
     endpoint: ENDPOINT,
     lastError: null,
-    ...overrides,
-  };
-}
-
-function makeConnection(overrides: Partial<ConnectionDto> = {}): ConnectionDto {
-  return {
-    id: "c1",
-    name: "Production Linux",
-    protocolId: "ssh",
-    protocolDisplayName: "SSH",
-    description: null,
-    tags: [],
-    notes: null,
-    enabled: true,
-    capabilities: [],
-    hasSecret: true,
-    createdAt: 1_760_000_000_000,
-    updatedAt: 1_760_000_000_000,
-    revision: 1,
     ...overrides,
   };
 }
@@ -104,15 +97,6 @@ function makeOverview(overrides: Partial<OverviewDto> = {}): OverviewDto {
   };
 }
 
-function makeGrant(overrides: Partial<GrantDto> = {}): GrantDto {
-  return {
-    connection: makeConnection(),
-    allowed: false,
-    grantedAt: null,
-    ...overrides,
-  };
-}
-
 function makeCreatedToken(name: string): { token: TokenDto; plaintext: string } {
   return {
     token: makeToken({ id: "t-new", name, prefix: "newpre" }),
@@ -141,17 +125,12 @@ beforeEach(() => {
 
   api.getOverview.mockResolvedValue(makeOverview());
   api.listTokens.mockResolvedValue({ items: [], total: 0 });
-  api.listConnections.mockResolvedValue({ items: [makeConnection()], total: 1 });
-  api.listTokenGrants.mockResolvedValue([]);
   api.createToken.mockImplementation(async (input: { name: string }) =>
     makeCreatedToken(input.name),
   );
+  api.getTokenMcpConfig.mockResolvedValue(makeConfig(PLAINTEXT));
   api.startMcp.mockResolvedValue(makeMcp({ running: true }));
   api.stopMcp.mockResolvedValue(makeMcp({ running: false }));
-  api.setTokenGrant.mockImplementation(
-    async (input: { connectionId: string; allowed: boolean }) =>
-      makeGrant({ allowed: input.allowed, grantedAt: input.allowed ? 1 : null }),
-  );
 });
 
 describe("首页 - 概览", () => {
@@ -197,20 +176,23 @@ describe("首页 - MCP 服务", () => {
   it("启动失败时用 toUserMessage 展示端口占用错误", async () => {
     api.startMcp.mockRejectedValue({
       code: "conflict",
-      message: "端口 17321 已被占用",
+      message: "端口 47321 已被占用",
     });
 
     render(<HomePage />);
     fireEvent.click(await screen.findByRole("button", { name: "启动服务" }));
 
-    const alert = await screen.findByText(/端口 17321 已被占用/);
+    const alert = await screen.findByText(/端口 47321 已被占用/);
     expect(alert).toBeInTheDocument();
     expect(alert).toHaveTextContent("数据已被其他操作修改");
   });
 });
 
 describe("首页 - 快速开始", () => {
-  it("创建 Token 后生成含明文的配置，复制提示词不含 Token", async () => {
+  it("创建 Token 后自动生成配置，提示词包含该配置", async () => {
+    const config = makeConfig(PLAINTEXT);
+    api.getTokenMcpConfig.mockResolvedValue(config);
+
     render(<HomePage />);
 
     fireEvent.change(await screen.findByLabelText("Token 名称"), {
@@ -221,87 +203,117 @@ describe("首页 - 快速开始", () => {
     await waitFor(() =>
       expect(api.createToken).toHaveBeenCalledWith({ name: "AI Client" }),
     );
-    expect(await screen.findByText(/明文仅显示一次/)).toBeInTheDocument();
-
-    const step4 = scopeToStep("复制 MCP 配置");
-    const maskedConfig = within(step4).getByTestId("mcp-config");
-    expect(maskedConfig).not.toHaveTextContent(PLAINTEXT);
-
-    fireEvent.click(within(step4).getByRole("button", { name: "显示 Token" }));
-    expect(within(step4).getByTestId("mcp-config")).toHaveTextContent(PLAINTEXT);
-    expect(within(step4).getByTestId("mcp-config")).toHaveTextContent(
-      `"transport": "streamable-http"`,
+    expect(await screen.findByText(/Token 已创建/)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(api.getTokenMcpConfig).toHaveBeenCalledWith("t-new"),
     );
-    expect(within(step4).getByTestId("mcp-config")).toHaveTextContent(ENDPOINT);
 
-    fireEvent.click(within(step4).getByRole("button", { name: "复制配置" }));
+    const step3 = scopeToStep("选择访问 Token");
+    const shownConfig = within(step3).getByTestId("mcp-config");
+    await waitFor(() => expect(shownConfig).toHaveTextContent(PLAINTEXT));
+    expect(shownConfig).toHaveTextContent(`"transport": "streamable-http"`);
+    expect(shownConfig).toHaveTextContent(ENDPOINT);
+
+    const step4 = scopeToStep("复制提示词");
+    const prompt = within(step4).getByTestId("ai-prompt");
+    expect(prompt).toHaveTextContent(PLAINTEXT);
+    expect(prompt).toHaveTextContent("tools/list");
+
+    fireEvent.click(within(step3).getByRole("button", { name: "复制配置" }));
     await waitFor(() => expect(writeTextMock).toHaveBeenCalledTimes(1));
-    const copiedConfig = writeTextMock.mock.calls[0][0] as string;
-    expect(copiedConfig).toContain(`Bearer ${PLAINTEXT}`);
-    expect(copiedConfig).toContain(ENDPOINT);
+    expect(writeTextMock.mock.calls[0][0]).toBe(config);
 
-    fireEvent.click(screen.getByRole("button", { name: "复制接入提示词" }));
+    fireEvent.click(within(step4).getByRole("button", { name: "复制接入提示词" }));
     await waitFor(() => expect(writeTextMock).toHaveBeenCalledTimes(2));
     const copiedPrompt = writeTextMock.mock.calls[1][0] as string;
-    expect(copiedPrompt).not.toContain(PLAINTEXT);
-    expect(copiedPrompt).toContain("1. 只能使用 Universal MCP Terminal");
-    expect(copiedPrompt).toContain("10. 发生连接失败或执行异常时");
+    expect(copiedPrompt).toContain(`Bearer ${PLAINTEXT}`);
+    expect(copiedPrompt).toContain('"universal-mcp-terminal"');
+    expect(copiedPrompt).toContain("tools/list");
     expect(await screen.findByText("AI 接入提示词已复制到剪贴板。")).toBeInTheDocument();
   });
 
-  it("没有明文 Token 时不伪造 Token，可粘贴后生成配置", async () => {
+  it("已有 Token 时无需新建，直接生成配置和提示词", async () => {
+    const config = makeConfig("umt_existing_token");
     api.getOverview.mockResolvedValue(makeOverview({ tokenCount: 1 }));
     api.listTokens.mockResolvedValue({ items: [makeToken()], total: 1 });
+    api.getTokenMcpConfig.mockResolvedValue(config);
 
     render(<HomePage />);
 
-    expect(await screen.findByText(/当前没有可用的 Token 明文/)).toBeInTheDocument();
-    expect(screen.queryByTestId("mcp-config")).not.toBeInTheDocument();
-
-    fireEvent.change(screen.getByLabelText("粘贴 Token 明文"), {
-      target: { value: "umt_pasted_token" },
-    });
-
-    const step4 = scopeToStep("复制 MCP 配置");
-    expect(await within(step4).findByTestId("mcp-config")).toBeInTheDocument();
-    fireEvent.click(within(step4).getByRole("button", { name: "显示 Token" }));
-    expect(within(step4).getByTestId("mcp-config")).toHaveTextContent(
-      "Bearer umt_pasted_token",
+    const select = await screen.findByLabelText("选择访问 Token");
+    expect(select).toHaveValue("t1");
+    await waitFor(() =>
+      expect(api.getTokenMcpConfig).toHaveBeenCalledWith("t1"),
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "复制接入提示词" }));
+    const step3 = scopeToStep("选择访问 Token");
+    await waitFor(() =>
+      expect(within(step3).getByTestId("mcp-config")).toHaveTextContent(
+        "umt_existing_token",
+      ),
+    );
+    expect(screen.queryByText(/无法获取密钥/)).not.toBeInTheDocument();
+
+    const step4 = scopeToStep("复制提示词");
+    const prompt = within(step4).getByTestId("ai-prompt");
+    expect(prompt).toHaveTextContent("umt_existing_token");
+    fireEvent.click(within(step4).getByRole("button", { name: "复制接入提示词" }));
     await waitFor(() => expect(writeTextMock).toHaveBeenCalledTimes(1));
-    expect(writeTextMock.mock.calls[0][0] as string).not.toContain("umt_pasted_token");
+    expect(writeTextMock.mock.calls[0][0] as string).toContain(config);
   });
 
-  it("切换连接授权时调用 setTokenGrant 并以返回值为准", async () => {
-    api.getOverview.mockResolvedValue(makeOverview({ tokenCount: 1 }));
-    api.listTokens.mockResolvedValue({ items: [makeToken()], total: 1 });
-    api.listTokenGrants.mockResolvedValue([makeGrant()]);
+  it("切换 Token 时按所选 Token 重新生成配置", async () => {
+    api.getOverview.mockResolvedValue(makeOverview({ tokenCount: 2 }));
+    api.listTokens.mockResolvedValue({
+      items: [
+        makeToken(),
+        makeToken({ id: "t2", name: "Cursor", prefix: "cursor" }),
+      ],
+      total: 2,
+    });
+    api.getTokenMcpConfig.mockImplementation(async (tokenId: string) =>
+      makeConfig(tokenId === "t2" ? "umt_cursor_token" : "umt_claude_token"),
+    );
 
     render(<HomePage />);
 
-    const toggle = await screen.findByRole("switch", {
-      name: "授权 Production Linux",
+    const step3 = scopeToStep("选择访问 Token");
+    const select = await within(step3).findByLabelText("选择访问 Token");
+    await waitFor(() =>
+      expect(within(step3).getByTestId("mcp-config")).toHaveTextContent(
+        "umt_claude_token",
+      ),
+    );
+
+    fireEvent.change(select, { target: { value: "t2" } });
+    await waitFor(() =>
+      expect(within(step3).getByTestId("mcp-config")).toHaveTextContent(
+        "umt_cursor_token",
+      ),
+    );
+    expect(api.getTokenMcpConfig).toHaveBeenLastCalledWith("t2");
+  });
+
+  it("旧版本 Token 无法生成配置时给出提示且禁止复制", async () => {
+    api.getOverview.mockResolvedValue(makeOverview({ tokenCount: 1 }));
+    api.listTokens.mockResolvedValue({ items: [makeToken()], total: 1 });
+    api.getTokenMcpConfig.mockRejectedValue({
+      code: "validation",
+      message: "该 Token 创建于旧版本，无法获取密钥，请在访问控制中重新创建",
     });
-    expect(toggle).not.toBeChecked();
-    expect(screen.getByText("未授权")).toBeInTheDocument();
 
-    fireEvent.click(toggle);
+    render(<HomePage />);
 
-    await waitFor(() =>
-      expect(api.setTokenGrant).toHaveBeenCalledWith({
-        tokenId: "t1",
-        connectionId: "c1",
-        allowed: true,
-      }),
-    );
-    await waitFor(() =>
-      expect(
-        screen.getByRole("switch", { name: "授权 Production Linux" }),
-      ).toBeChecked(),
-    );
-    expect(screen.getByText("已授权")).toBeInTheDocument();
+    expect(await screen.findByText(/创建于旧版本/)).toBeInTheDocument();
+
+    const step3 = scopeToStep("选择访问 Token");
+    expect(
+      within(step3).getByRole("button", { name: "复制配置" }),
+    ).toBeDisabled();
+    const step4 = scopeToStep("复制提示词");
+    expect(
+      within(step4).getByRole("button", { name: "复制接入提示词" }),
+    ).toBeDisabled();
   });
 
   it("未填写 Token 名称时阻止创建", async () => {

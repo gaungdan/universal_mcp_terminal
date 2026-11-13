@@ -202,6 +202,7 @@ impl SecretRepo for InMemorySecretRepo {
 #[derive(Debug, Default)]
 pub struct InMemoryTokenRepo {
     inner: RwLock<HashMap<TokenId, TokenRecord>>,
+    secrets: RwLock<HashMap<TokenId, SecretBlob>>,
 }
 
 impl InMemoryTokenRepo {
@@ -298,7 +299,20 @@ impl TokenRepo for InMemoryTokenRepo {
     }
 
     async fn delete(&self, id: TokenId) -> Result<bool, PersistenceError> {
+        self.secrets.write().await.remove(&id);
         Ok(self.inner.write().await.remove(&id).is_some())
+    }
+
+    async fn put_secret(&self, id: TokenId, secret: SecretBlob) -> Result<(), PersistenceError> {
+        if !self.inner.read().await.contains_key(&id) {
+            return Err(PersistenceError::not_found("Token", id.to_string()));
+        }
+        self.secrets.write().await.insert(id, secret);
+        Ok(())
+    }
+
+    async fn get_secret(&self, id: TokenId) -> Result<Option<SecretBlob>, PersistenceError> {
+        Ok(self.secrets.read().await.get(&id).cloned())
     }
 }
 

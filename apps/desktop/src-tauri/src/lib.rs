@@ -42,6 +42,7 @@ pub fn run() {
             umt_app::ipc::commands::delete_host_key,
             umt_app::ipc::commands::list_tokens,
             umt_app::ipc::commands::create_token,
+            umt_app::ipc::commands::get_token_mcp_config,
             umt_app::ipc::commands::update_token,
             umt_app::ipc::commands::set_token_status,
             umt_app::ipc::commands::delete_token,

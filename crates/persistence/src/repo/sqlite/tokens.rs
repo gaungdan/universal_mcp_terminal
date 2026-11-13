@@ -6,10 +6,11 @@ use sqlx::sqlite::SqliteRow;
 use umt_core::{Page, PageRequest, Token, TokenId, TokenStatus, UnixMillis};
 
 use super::support::{
-    RowExt, backend, count_to_u64, is_unique_violation, parse_id, token_status_from_str,
+    RowExt, backend, count_to_u64, is_foreign_key_violation, is_unique_violation, narrow, parse_id,
+    token_status_from_str,
 };
 use crate::error::PersistenceError;
-use crate::models::TokenRecord;
+use crate::models::{SecretBlob, TokenRecord};
 use crate::repo::TokenRepo;
 
 /// 访问 Token 的 SQLite 仓库。
@@ -214,5 +215,49 @@ impl TokenRepo for SqliteTokenRepo {
             .await
             .map_err(backend)?;
         Ok(done.rows_affected() > 0)
+    }
+
+    async fn put_secret(&self, id: TokenId, secret: SecretBlob) -> Result<(), PersistenceError> {
+        let result = sqlx::query(
+            "INSERT INTO token_secrets (token_id, ciphertext, nonce, key_version) \
+             VALUES (?, ?, ?, ?) \
+             ON CONFLICT(token_id) DO UPDATE SET \
+             ciphertext = excluded.ciphertext, nonce = excluded.nonce, \
+             key_version = excluded.key_version",
+        )
+        .bind(id.to_string())
+        .bind(secret.ciphertext)
+        .bind(secret.nonce)
+        .bind(secret.key_version)
+        .execute(&self.pool)
+        .await;
+
+        match result {
+            Ok(_) => Ok(()),
+            Err(err) if is_foreign_key_violation(&err) => {
+                Err(PersistenceError::not_found("Token", id.to_string()))
+            }
+            Err(err) => Err(backend(err)),
+        }
+    }
+
+    async fn get_secret(&self, id: TokenId) -> Result<Option<SecretBlob>, PersistenceError> {
+        let row = sqlx::query(
+            "SELECT ciphertext, nonce, key_version FROM token_secrets WHERE token_id = ?",
+        )
+        .bind(id.to_string())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(backend)?;
+
+        row.as_ref()
+            .map(|row| {
+                Ok(SecretBlob {
+                    ciphertext: row.blob("ciphertext")?,
+                    nonce: row.blob("nonce")?,
+                    key_version: narrow::<u32>(row.int("key_version")?)?,
+                })
+            })
+            .transpose()
     }
 }

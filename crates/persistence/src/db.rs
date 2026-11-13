@@ -79,6 +79,7 @@ mod tests {
                 "settings",
                 "ssh_host_keys",
                 "token_connection_grants",
+                "token_secrets",
                 "tokens",
             ],
             "v1 表结构不应包含 import_log"

@@ -142,6 +142,14 @@ pub async fn create_token(
 }
 
 #[tauri::command]
+pub async fn get_token_mcp_config(
+    state: State<'_, AppState>,
+    token_id: String,
+) -> Result<String, ApiError> {
+    Ok(services::tokens::mcp_config(state.inner(), &token_id).await?)
+}
+
+#[tauri::command]
 pub async fn update_token(
     state: State<'_, AppState>,
     input: UpdateTokenInput,

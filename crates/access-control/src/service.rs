@@ -4,8 +4,8 @@ use umt_core::{
     Connection, ConnectionId, Page, PageRequest, Token, TokenContext, TokenId, TokenStatus,
     UmtError, UnixMillis,
 };
-use umt_persistence::{ConnectionRepo, GrantRepo, GrantView, TokenRecord, TokenRepo};
-use umt_security::TokenService;
+use umt_persistence::{ConnectionRepo, GrantRepo, GrantView, SecretBlob, TokenRecord, TokenRepo};
+use umt_security::{EncryptedSecret, SecretCipher, TokenService};
 
 /// 创建 Token 的结果：明文只在这里出现一次。
 pub struct CreatedToken {
@@ -34,6 +34,7 @@ pub struct AccessControl {
     connections: Arc<dyn ConnectionRepo>,
     grants: Arc<dyn GrantRepo>,
     token_service: TokenService,
+    cipher: RwLock<Option<Arc<dyn SecretCipher>>>,
     revoker: RwLock<Option<Arc<dyn SessionRevoker>>>,
 }
 
@@ -49,8 +50,23 @@ impl AccessControl {
             connections,
             grants,
             token_service,
+            cipher: RwLock::new(None),
             revoker: RwLock::new(None),
         }
+    }
+
+    /// 注入凭据加密器后，新建 Token 会自动保存一份加密明文，供本机生成 MCP 配置。
+    pub fn set_cipher(&self, cipher: Arc<dyn SecretCipher>) {
+        if let Ok(mut guard) = self.cipher.write() {
+            *guard = Some(cipher);
+        }
+    }
+
+    fn cipher(&self) -> Option<Arc<dyn SecretCipher>> {
+        self.cipher
+            .read()
+            .ok()
+            .and_then(|guard| guard.as_ref().cloned())
     }
 
     /// 启动时注入 Session Manager，之后撤销操作才能联动关闭会话。
@@ -102,10 +118,52 @@ impl AccessControl {
                 hmac: hash.hmac_hex,
             })
             .await?;
+
+        // 保存加密后的明文副本，供本机生成 MCP 配置；未注入加密器时跳过（如单元测试）。
+        if let Some(cipher) = self.cipher() {
+            let encrypted = cipher.encrypt(secret.expose().as_bytes())?;
+            self.tokens
+                .put_secret(
+                    token.id,
+                    SecretBlob {
+                        ciphertext: encrypted.ciphertext,
+                        nonce: encrypted.nonce.to_vec(),
+                        key_version: encrypted.key_version,
+                    },
+                )
+                .await?;
+        }
+
         Ok(CreatedToken {
             token,
             plaintext: secret.expose().to_string(),
         })
+    }
+
+    /// 读取 Token 明文的加密副本，仅供本地生成 MCP 配置使用。
+    ///
+    /// 旧版本创建的 Token 没有该副本，返回 `None`。
+    pub async fn token_secret(&self, id: TokenId) -> Result<Option<String>, UmtError> {
+        let Some(blob) = self.tokens.get_secret(id).await? else {
+            return Ok(None);
+        };
+        let cipher = self
+            .cipher()
+            .ok_or_else(|| UmtError::Internal("未配置 Token 加密服务".into()))?;
+        let nonce: [u8; 12] = blob
+            .nonce
+            .as_slice()
+            .try_into()
+            .map_err(|_| UmtError::Storage("Token 随机数长度非法".into()))?;
+        let encrypted = EncryptedSecret {
+            ciphertext: blob.ciphertext,
+            nonce,
+            key_version: blob.key_version,
+        };
+        let plaintext = cipher.decrypt(&encrypted)?;
+        String::from_utf8(plaintext.to_vec())
+            .map(Some)
+            .map_err(|_| UmtError::Storage("Token 明文不是合法的 UTF-8".into()))
     }
 
     pub async fn list_tokens(&self, page: PageRequest) -> Result<Page<Token>, UmtError> {
@@ -327,7 +385,7 @@ mod tests {
     use super::*;
     use umt_core::Connection;
     use umt_persistence::InMemoryRepos;
-    use umt_security::StaticKeyStore;
+    use umt_security::{AesGcmCipher, StaticKeyStore};
 
     struct RecordingRevoker {
         token_revoked: std::sync::Mutex<Vec<(TokenId, String)>>,
@@ -388,6 +446,8 @@ mod tests {
         );
         let revoker = RecordingRevoker::new();
         service.set_revoker(revoker.clone());
+        let cipher = AesGcmCipher::from_keystore(&StaticKeyStore::new()).expect("装载主密钥失败");
+        service.set_cipher(Arc::new(cipher));
         Fixture {
             service,
             repos,
@@ -414,6 +474,22 @@ mod tests {
             .await
             .expect("插入连接失败");
         id
+    }
+
+    #[tokio::test]
+    async fn created_token_keeps_encrypted_secret_for_config() {
+        let f = fixture().await;
+        let created = f
+            .service
+            .create_token("config", None, None)
+            .await
+            .expect("创建失败");
+        let secret = f
+            .service
+            .token_secret(created.token.id)
+            .await
+            .expect("读取失败");
+        assert_eq!(secret.as_deref(), Some(created.plaintext.as_str()));
     }
 
     #[tokio::test]

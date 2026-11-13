@@ -100,6 +100,7 @@ impl AppState {
             repos.grants.clone(),
             token_service,
         ));
+        access.set_cipher(cipher.clone());
         let audit = Arc::new(AuditService::new(repos.audit.clone()));
 
         let (policy, limits) = read_security_config(&repos).await?;
