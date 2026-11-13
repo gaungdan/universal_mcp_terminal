@@ -75,10 +75,11 @@ sha2 = "0.11.1"
 subtle = "2.6.1"
 zeroize = { version = "1.9.1", features = ["derive"] }
 rand = "0.10.3"
-keyring = { version = "4.2.0", features = ["windows-native-keyring-store"] }
+keyring = { version = "4.2.0", features = ["v1"] }
 
 # ---- 协议 ----
-russh = "0.65.1"
+# 使用 ring 作为密码学后端：本机 GNU 工具链下 aws-lc-sys 会因 MinGW 缺少 nanosleep64 链接失败。
+russh = { version = "0.65.1", default-features = false, features = ["ring", "rsa", "flate2"] }
 
 # ---- MCP ----
 rmcp = { version = "3.9.0", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
@@ -92,3 +93,6 @@ tauri-build = "2.7.4"
 
 # ---- 平台 ----
 windows-sys = "0.61.2"
+
+# ---- 测试 ----
+reqwest = { version = "0.13", default-features = false, features = ["json"] }

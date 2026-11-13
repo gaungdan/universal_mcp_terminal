@@ -1,72 +1,65 @@
+import { Component, type ErrorInfo, type ReactNode } from "react";
 import { HashRouter, Route, Routes } from "react-router-dom";
 import AppLayout from "./layout/AppLayout";
+import HomePage from "./pages/home/HomePage";
+import ConnectionsPage from "./pages/connections";
+import AccessControlPage from "./pages/access-control/AccessControlPage";
+import AuditPage from "./pages/audit";
+import SettingsPage from "./pages/settings";
 
-type PlaceholderPageProps = {
-  title: string;
-  description: string;
+type ErrorBoundaryProps = {
+  children: ReactNode;
 };
 
-function PlaceholderPage({ title, description }: PlaceholderPageProps) {
-  return (
-    <section className="page">
-      <h1>{title}</h1>
-      <p>{description}</p>
-    </section>
-  );
+type ErrorBoundaryState = {
+  error: Error | null;
+};
+
+class AppErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  state: ErrorBoundaryState = { error: null };
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("页面渲染失败", error, info.componentStack);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <section className="page">
+          <h1>页面渲染失败</h1>
+          <p role="alert">{this.state.error.message}</p>
+          <button
+            type="button"
+            className="btn btn--ghost"
+            onClick={() => this.setState({ error: null })}
+          >
+            重试
+          </button>
+        </section>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 export default function App() {
   return (
     <HashRouter>
-      <Routes>
-        <Route element={<AppLayout />}>
-          <Route
-            index
-            element={
-              <PlaceholderPage
-                title="首页"
-                description="工作台概览：连接状态与最近活动将在此展示。"
-              />
-            }
-          />
-          <Route
-            path="connections"
-            element={
-              <PlaceholderPage
-                title="连接管理"
-                description="在此配置和管理 MCP 服务连接。"
-              />
-            }
-          />
-          <Route
-            path="access-control"
-            element={
-              <PlaceholderPage
-                title="访问控制"
-                description="在此配置角色、权限与访问策略。"
-              />
-            }
-          />
-          <Route
-            path="audit"
-            element={
-              <PlaceholderPage
-                title="审计日志"
-                description="在此查看系统操作与访问审计记录。"
-              />
-            }
-          />
-          <Route
-            path="settings"
-            element={
-              <PlaceholderPage
-                title="系统设置"
-                description="在此调整应用外观、存储与运行参数。"
-              />
-            }
-          />
-        </Route>
-      </Routes>
+      <AppErrorBoundary>
+        <Routes>
+          <Route element={<AppLayout />}>
+            <Route index element={<HomePage />} />
+            <Route path="connections" element={<ConnectionsPage />} />
+            <Route path="access-control" element={<AccessControlPage />} />
+            <Route path="audit" element={<AuditPage />} />
+            <Route path="settings" element={<SettingsPage />} />
+          </Route>
+        </Routes>
+      </AppErrorBoundary>
     </HashRouter>
   );
 }

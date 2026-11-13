@@ -3,3 +3,12 @@
 //! 独占写入范围：`crates/providers/ssh/**`。
 
 #![deny(unsafe_code)]
+
+mod config;
+mod error;
+mod host_key;
+mod provider;
+mod session;
+
+pub use provider::SshProvider;
+pub use session::SshSession;

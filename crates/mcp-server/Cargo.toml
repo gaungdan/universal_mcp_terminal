@@ -12,6 +12,8 @@ umt-protocol-registry = { workspace = true }
 umt-session-manager = { workspace = true }
 umt-access-control = { workspace = true }
 umt-audit = { workspace = true }
+umt-persistence = { workspace = true }
+umt-security = { workspace = true }
 rmcp = { workspace = true }
 axum = { workspace = true }
 tower = { workspace = true }
@@ -25,3 +27,6 @@ schemars = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
+
+[dev-dependencies]
+reqwest = { workspace = true }

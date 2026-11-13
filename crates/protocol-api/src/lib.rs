@@ -1,6 +1,24 @@
-//! 协议 Provider 统一抽象：`ProtocolProvider`、`TerminalSession`、`ConfigSchema`、`ConnectionTestResult`。
+//! 协议 Provider 统一抽象。
 //!
-//! 约束：本 crate 不允许出现任何具体协议（SSH/Telnet/WSL）的分支逻辑。
-//! 契约冻结后由 T2 维护，其他工单只读。
+//! 本 crate 只描述"协议能做什么"，不包含任何具体协议的实现。
+//! 契约状态：T2 冻结。
 
 #![deny(unsafe_code)]
+
+pub mod error;
+pub mod mock;
+pub mod provider;
+pub mod schema;
+pub mod session;
+pub mod test_result;
+
+pub use error::{ProviderError, SessionError};
+pub use mock::MockProvider;
+pub use provider::{ProtocolDescriptor, ProtocolProvider};
+pub use schema::{
+    ConfigField, ConfigSchema, FieldCondition, FieldKind, FieldValidation, SelectOption,
+};
+pub use session::{
+    ConnectOptions, ExecRequest, ExecResult, OutputChunk, SecretValues, TerminalSession,
+};
+pub use test_result::{ConnectionTestResult, TestStep, TestStepStatus};

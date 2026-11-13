@@ -6,6 +6,12 @@
   --color-muted: #5b6b60;
   --color-accent: #1f5c3a;
   --color-accent-soft: #e4efe7;
+  --color-danger: #a33a35;
+  --color-danger-soft: #f8e8e6;
+  --color-warning: #8a5a12;
+  --color-warning-soft: #f8efdb;
+  --color-info: #2a5f86;
+  --color-info-soft: #e4eff8;
   --radius: 8px;
 
   font-family:
@@ -112,4 +118,347 @@ body {
   margin: 0;
   color: var(--color-muted);
   line-height: 1.7;
+}
+
+/* ---------------- 通用按钮 ---------------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 14px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.2;
+  color: var(--color-text);
+  background-color: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.btn--primary {
+  color: #ffffff;
+  background-color: var(--color-accent);
+}
+
+.btn--primary:hover:not(:disabled) {
+  background-color: #184a2e;
+}
+
+.btn--danger {
+  color: #ffffff;
+  background-color: var(--color-danger);
+}
+
+.btn--danger:hover:not(:disabled) {
+  background-color: #8c302c;
+}
+
+.btn--ghost {
+  border-color: var(--color-border);
+}
+
+.btn--ghost:hover:not(:disabled) {
+  color: var(--color-accent);
+  background-color: var(--color-accent-soft);
+  border-color: var(--color-accent);
+}
+
+.btn--small {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+/* ---------------- 表单 ---------------- */
+
+.schema-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.schema-form__empty {
+  margin: 0;
+  color: var(--color-muted);
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-field__label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.form-field__label--required::after {
+  content: "*";
+  margin-left: 2px;
+  color: var(--color-danger);
+  font-weight: 600;
+}
+
+.form-field__control {
+  width: 100%;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-text);
+  background-color: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.form-field__control:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+  border-color: var(--color-accent);
+}
+
+.form-field__control:disabled {
+  color: var(--color-muted);
+  background-color: #f3f6f3;
+  cursor: not-allowed;
+}
+
+textarea.form-field__control {
+  min-height: 80px;
+  resize: vertical;
+}
+
+.form-field__checkbox {
+  width: 16px;
+  height: 16px;
+  margin: 2px 0;
+  accent-color: var(--color-accent);
+}
+
+.form-field__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.form-field__row .form-field__control {
+  flex: 1;
+  min-width: 0;
+}
+
+.form-field .form-field__help {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-muted);
+  line-height: 1.6;
+}
+
+.form-field .form-field__error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-danger);
+  line-height: 1.6;
+}
+
+.form-field--invalid .form-field__control {
+  border-color: var(--color-danger);
+}
+
+/* ---------------- 状态徽标 ---------------- */
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.6;
+  white-space: nowrap;
+  border-radius: 999px;
+}
+
+.status-badge__dot {
+  width: 6px;
+  height: 6px;
+  background-color: currentColor;
+  border-radius: 50%;
+}
+
+.status-badge--success {
+  color: var(--color-accent);
+  background-color: var(--color-accent-soft);
+}
+
+.status-badge--warning {
+  color: var(--color-warning);
+  background-color: var(--color-warning-soft);
+}
+
+.status-badge--danger {
+  color: var(--color-danger);
+  background-color: var(--color-danger-soft);
+}
+
+.status-badge--info {
+  color: var(--color-info);
+  background-color: var(--color-info-soft);
+}
+
+.status-badge--neutral {
+  color: var(--color-muted);
+  background-color: #eceff0;
+}
+
+/* ---------------- 空状态 ---------------- */
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 40px 24px;
+  text-align: center;
+}
+
+.empty-state .empty-state__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.empty-state .empty-state__description {
+  max-width: 420px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-muted);
+  line-height: 1.7;
+}
+
+.empty-state__action {
+  margin-top: 8px;
+}
+
+/* ---------------- 区块卡片 ---------------- */
+
+.section-card {
+  display: flex;
+  flex-direction: column;
+  background-color: var(--color-panel);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.section-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.section-card__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.section-card__description {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--color-muted);
+  line-height: 1.6;
+}
+
+.section-card__actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-card__body {
+  padding: 16px 18px;
+}
+
+/* ---------------- 工具栏 ---------------- */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.toolbar__main,
+.toolbar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ---------------- 确认对话框 ---------------- */
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background-color: rgba(18, 33, 24, 0.38);
+}
+
+.dialog {
+  width: 100%;
+  max-width: 420px;
+  padding: 22px 24px;
+  background-color: var(--color-panel);
+  border-radius: var(--radius);
+  box-shadow: 0 18px 44px rgba(17, 34, 24, 0.24);
+}
+
+.dialog__title {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.dialog__description {
+  font-size: 13px;
+  color: var(--color-muted);
+  line-height: 1.7;
+}
+
+.dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
 }

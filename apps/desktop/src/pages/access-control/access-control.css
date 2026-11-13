@@ -1,0 +1,448 @@
+.access-control__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.access-control .access-control__header h1 {
+  margin: 0 0 6px;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.access-control .access-control__header p {
+  margin: 0;
+  color: var(--color-muted);
+  line-height: 1.7;
+}
+
+.access-control__layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.access-control__layout--with-detail {
+  grid-template-columns: minmax(0, 1fr) 420px;
+}
+
+.access-control__main {
+  min-width: 0;
+}
+
+.access-control__hint {
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.access-control__pager {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.access-control__page-label {
+  font-size: 12px;
+  color: var(--color-muted);
+  white-space: nowrap;
+}
+
+.access-control__loading {
+  padding: 24px 0;
+  text-align: center;
+}
+
+.access-control__alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  font-size: 13px;
+  border-radius: var(--radius);
+}
+
+.access-control__alert--danger {
+  color: var(--color-danger);
+  background-color: var(--color-danger-soft);
+  border: 1px solid #eccfcc;
+}
+
+.access-control__table-wrap {
+  overflow-x: auto;
+}
+
+.access-control__table {
+  width: 100%;
+  min-width: 820px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.access-control__table th {
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-muted);
+  text-align: left;
+  white-space: nowrap;
+  background-color: #f7f9f7;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.access-control__table td {
+  padding: 10px;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.access-control__row {
+  cursor: pointer;
+}
+
+.access-control__row:hover {
+  background-color: #f7faf8;
+}
+
+.access-control__row--selected,
+.access-control__row--selected:hover {
+  background-color: var(--color-accent-soft);
+}
+
+.access-control__name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 140px;
+}
+
+.access-control__name .link-button {
+  align-self: flex-start;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--color-accent);
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.access-control__name .link-button:hover {
+  text-decoration: underline;
+}
+
+.access-control__name .link-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.access-control__subtext {
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.access-control__masked {
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  color: var(--color-text);
+  white-space: nowrap;
+}
+
+.access-control__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.access-control__actions .access-control__danger:not(:disabled) {
+  color: var(--color-danger);
+  border-color: #e6c9c6;
+}
+
+.access-control__actions .access-control__danger:hover:not(:disabled) {
+  color: var(--color-danger);
+  background-color: var(--color-danger-soft);
+  border-color: var(--color-danger);
+}
+
+/* ---------------- 详情与授权矩阵 ---------------- */
+
+.access-control__detail {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: calc(100vh - 48px);
+  padding: 18px;
+  overflow: auto;
+  background-color: var(--color-panel);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.detail-header__heading {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.detail-header__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.detail-header__token {
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  color: var(--color-muted);
+  overflow-wrap: anywhere;
+}
+
+.detail-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+  margin: 0;
+  padding: 12px;
+  background-color: #f7f9f7;
+  border-radius: var(--radius);
+}
+
+.detail-meta__item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.detail-meta__item dt {
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.detail-meta__item dd {
+  margin: 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.access-control__detail .detail-description {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-muted);
+  line-height: 1.7;
+}
+
+.grants {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+}
+
+.grants__heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.grants__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.grants__count {
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.access-control__detail .grants__hint {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--color-warning);
+  line-height: 1.6;
+  background-color: var(--color-warning-soft);
+  border-radius: var(--radius);
+}
+
+.access-control__detail .grants__state {
+  margin: 0;
+  padding: 16px 0;
+  font-size: 13px;
+  color: var(--color-muted);
+  text-align: center;
+}
+
+.grant-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.grant-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.grant-item__name {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.grant-item__protocol {
+  font-size: 12px;
+  color: var(--color-muted);
+  white-space: nowrap;
+}
+
+.grant-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.grant-toggle input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--color-accent);
+}
+
+.grant-toggle input:disabled {
+  cursor: not-allowed;
+}
+
+.grant-item__time {
+  font-size: 12px;
+  color: var(--color-muted);
+  white-space: nowrap;
+}
+
+/* ---------------- 新建 Token ---------------- */
+
+.token-dialog {
+  max-width: 460px;
+}
+
+.token-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+/* ---------------- 一次性 Token 展示 ---------------- */
+
+.token-reveal {
+  max-width: 520px;
+}
+
+.token-reveal__warning {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-danger);
+  line-height: 1.6;
+  background-color: var(--color-danger-soft);
+  border: 1px solid #eccfcc;
+  border-radius: var(--radius);
+}
+
+.token-reveal__name {
+  margin: 14px 0 6px;
+  font-size: 13px;
+  color: var(--color-muted);
+}
+
+.token-reveal__value {
+  padding: 12px;
+  overflow: hidden;
+  background-color: #f3f6f3;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.token-reveal__value code {
+  display: block;
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  word-break: break-all;
+  user-select: all;
+}
+
+.token-reveal__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.token-reveal__feedback {
+  font-size: 12px;
+  color: var(--color-accent);
+}
+
+.token-reveal__feedback--error {
+  color: var(--color-danger);
+}
+
+.token-reveal__hint {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--color-muted);
+  line-height: 1.7;
+}
+
+.token-reveal__hint code {
+  margin-left: 4px;
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+}
+
+@media (max-width: 1080px) {
+  .access-control__layout--with-detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .access-control__detail {
+    position: static;
+    max-height: none;
+  }
+}

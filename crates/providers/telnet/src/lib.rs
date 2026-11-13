@@ -3,3 +3,11 @@
 //! 独占写入范围：`crates/providers/telnet/**`。
 
 #![deny(unsafe_code)]
+
+mod config;
+mod provider;
+mod session;
+mod wire;
+
+pub use provider::TelnetProvider;
+pub use session::TelnetSession;

@@ -279,6 +279,46 @@ Wave 3 (并行): T20 | T21
 
 1. 本机没有 MSVC 构建工具，`rust-toolchain.toml` 固定为 `stable-x86_64-pc-windows-gnu`，不要改回默认 `stable`。
 2. 编译统一 `-j 1`（`.cargo/config.toml` 已设 `build.jobs = 1`）。
-3. `keyring` 只启用 `windows-native-keyring-store` 特性，新增其他平台特性需主控确认。
+3. `keyring` 只启用 `v1` 特性（内部按平台选择 Credential Manager），新增其他平台特性需主控确认。
 4. 前端产物固定在 `apps/desktop/dist`，Tauri `frontendDist` 指向 `../dist`。
 5. 不要删除 `backup/` 下的旧数据备份。
+6. `russh` 固定使用 `ring` 后端（`default-features = false, features = ["ring","rsa","flate2"]`）。本机 MinGW GNU 工具链下 `aws-lc-sys` 会因 `nanosleep64` 未定义而链接失败，不要改回默认的 `aws-lc-rs`。
+
+### T1–T5 契约冻结已完成（2026-11-13）
+
+| 工单 | 交付 | 位置 | 测试 |
+|---|---|---|---|
+| T1 | 领域模型：强类型 ID、`UnixMillis`、`Capability`、`Connection`、`Token`、`SessionState`/`ExecutionState`、`AuditRecord`/`AuditQuery`、`UmtError`、`AppEvent`、`Page` | `crates/core/src/**` | 18 个单测通过 |
+| T2 | `ProtocolProvider` / `TerminalSession` / `ConfigSchema` / `ConnectionTestResult` / `ProviderError` + `MockProvider` | `crates/protocol-api/src/**` | 9 个单测通过 |
+| T3 | 8 张表 v1 迁移、8 个仓库 trait、内存实现、`Database::connect` | `crates/persistence/src/**` | 11 个单测通过 |
+| T4 | AES-256-GCM 凭据加密、Token HMAC、Host Key 三态策略、系统凭据库封装 | `crates/security/src/**`、`docs/security/key-storage.md` | 12 个单测通过 |
+| T5 | 30 个 Tauri 命令签名 + DTO + 前端 `types.ts`/`client.ts` | `crates/app/src/ipc/**`、`apps/desktop/src/api/**` | 前端 typecheck/lint/test 通过 |
+| 附加 | `ProtocolRegistry`（协议注册与查询） | `crates/protocol-registry/src/lib.rs` | 2 个单测通过 |
+
+**契约冻结含义**：以上文件后续只允许「追加」或「主控统一修改」，并行 agent 只能读取。
+如需新增字段或命令，必须说明影响面并同步更新 Rust DTO 与前端 `types.ts`。
+
+### Wave 1 进度（2026-11-13）
+
+| 工单 | 状态 | 交付要点 |
+|---|---|---|
+| T3 附加 | ✅ | `TokenRepo::update_metadata` 追加（带默认实现，内存实现已覆盖） |
+| T6 | ✅ | 8 个 SQLite 仓库实现 + 重启恢复测试（20 个测试通过） |
+| T7 | ✅ | SSH：russh 0.65 + ring 后端、Host Key 三态、认证/exec/shell（19 个测试 + 1 个真实连接忽略项） |
+| T8 | ✅ | Telnet：登录状态机、IAC 过滤、分页自动翻页（16 个测试） |
+| T9 | ✅ | WSL：UTF-16LE 解码、Job Object 进程树清理、真实 uname 验证（29 个测试） |
+| T10 | ✅ | `AccessControl`：Token 生命周期、授权矩阵、七项校验、撤销联动（6 个测试） |
+| T11 | ✅ | `SessionManager`：状态机、Token 绑定、空闲回收、撤销联动（6 个测试） |
+| T12 | ✅ | `AuditService`：脱敏规则、追加、查询、CSV 导出（6 个测试） |
+| T13 | ✅ | MCP Server：rmcp 3.9 + 9 个工具 + HTTP 层 Bearer 中间件（14 单测 + 8 个真实 HTTP 用例） |
+| T14 | ✅ | 30/30 IPC 命令接线、启动装配、MCP 依赖注入、Tauri 注册、前端路由（3 个集成测试） |
+| T15 | ✅ | 前端基座：`SchemaForm`（7 种字段）、状态组件、错误处理、`useAsync`（23 个测试） |
+| T16–T19 | ✅ | 连接管理 / 访问控制 / 审计日志 / 首页与设置（合计 43 个页面用例） |
+| T20 | ✅ | 真实 HTTP 端到端 + 权限矩阵；发现并修复 HTTP 层未鉴权缺口 |
+| T21 | ✅ | 架构、MCP 接入、协议开发文档 + 测试报告 |
+
+**当前门禁**：`cargo fmt --check`、`cargo clippy --workspace --all-targets -D warnings`、`cargo test --workspace`（168 passed / 1 ignored）、前端 typecheck / lint / test（66）/ build 全通过。
+
+**仍未覆盖**：SSH 真实连接需环境变量；高风险操作确认策略尚未在 MCP/SessionManager 落地；`audit_events.outcome` 需新迁移补列。
+
+**已知技术债**：`audit_events` 冻结表结构没有独立 `outcome` 列，T6 暂时把 `outcome|state` 编码进 `status`，读写已封装在 `src/repo/sqlite/audit.rs`。后续用新迁移补列并回填，不要在旧迁移上直接改。
