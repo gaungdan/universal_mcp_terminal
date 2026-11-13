@@ -697,6 +697,16 @@ impl HostKeyRepo for InMemoryHostKeyRepo {
             .insert(record.endpoint.clone(), record);
         Ok(())
     }
+
+    async fn delete(&self, endpoint: &str) -> Result<bool, PersistenceError> {
+        Ok(self.inner.write().await.remove(endpoint).is_some())
+    }
+
+    async fn list(&self) -> Result<Vec<HostKeyRecord>, PersistenceError> {
+        let mut records: Vec<HostKeyRecord> = self.inner.read().await.values().cloned().collect();
+        records.sort_by_key(|record| std::cmp::Reverse(record.trusted_at));
+        Ok(records)
+    }
 }
 
 // ------------------------------------------------------------------ 组合入口

@@ -1,8 +1,10 @@
+import { useState } from "react";
 import type {
   ConnectionDetailDto,
   ConnectionTestResult,
   ProtocolInfoDto,
 } from "../../api/types";
+import { trustHostKey } from "../../api/client";
 import SectionCard from "../../components/SectionCard";
 import StatusBadge from "../../components/StatusBadge";
 import { formatUnixMillis, toUserMessage } from "../../lib/errors";
@@ -46,6 +48,31 @@ export default function ConnectionDetailPanel({
   const connection = detail?.connection ?? null;
   const secretFieldsSet = detail?.secretFieldsSet ?? [];
   const config = detail?.config ?? {};
+
+  const [trusting, setTrusting] = useState(false);
+  const [trustMessage, setTrustMessage] = useState<string | null>(null);
+  const observedHostKey = testResult?.hostKey ?? null;
+
+  async function handleTrustHostKey() {
+    if (!connection || !observedHostKey) {
+      return;
+    }
+    setTrusting(true);
+    setTrustMessage(null);
+    try {
+      await trustHostKey({
+        connectionId: connection.id,
+        fingerprint: observedHostKey.fingerprint,
+        algorithm: observedHostKey.algorithm ?? null,
+      });
+      setTrustMessage("已保存该 Host Key 指纹，正在重新测试…");
+      onTest();
+    } catch (error) {
+      setTrustMessage(toUserMessage(error));
+    } finally {
+      setTrusting(false);
+    }
+  }
 
   const secretLabels = secretFieldsSet.map((key) => {
     const field = protocol?.configSchema.fields.find((item) => item.key === key);
@@ -237,6 +264,44 @@ export default function ConnectionDetailPanel({
               {testError}
             </p>
           ) : null}
+
+          {observedHostKey ? (
+            <div
+              style={{
+                padding: "10px 12px",
+                fontSize: 13,
+                lineHeight: 1.7,
+                color: "var(--color-info)",
+                backgroundColor: "var(--color-info-soft)",
+                border: "1px solid var(--color-info)",
+                borderRadius: "var(--radius)",
+              }}
+            >
+              <p style={{ margin: 0 }}>
+                服务端 Host Key 指纹：
+                <code style={{ wordBreak: "break-all" }}>
+                  {observedHostKey.fingerprint}
+                </code>
+              </p>
+              <p style={{ margin: "4px 0 8px", color: "inherit" }}>
+                首次连接或指纹变化时必须人工确认。确认后该指纹会被固定，后续不一致将直接阻断连接。
+              </p>
+              <button
+                type="button"
+                className="btn btn--primary btn--small"
+                onClick={handleTrustHostKey}
+                disabled={trusting}
+              >
+                {trusting ? "保存中…" : "信任并保存该指纹"}
+              </button>
+              {trustMessage ? (
+                <p role="status" style={{ margin: "6px 0 0", color: "inherit" }}>
+                  {trustMessage}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
           {testResult ? <TestResultCard result={testResult} /> : null}
         </div>
       ) : null}

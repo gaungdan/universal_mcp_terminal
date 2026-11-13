@@ -8,10 +8,10 @@ use tauri::State;
 use crate::ipc::dto::{
     ApiError, AuditDto, AuditQueryDto, CloseSessionInput, ConnectionDetailDto, ConnectionDto,
     ConnectionFilterDto, ConnectionTestDto, CreateConnectionInput, CreateTokenInput,
-    CreatedTokenDto, DraftConnectionTestInput, ExportResultDto, GrantDto, McpConfigInput,
-    McpStatusDto, OverviewDto, PageDto, PageRequestDto, ProtocolInfoDto, SessionDto,
-    SessionFilterDto, SetGrantInput, SetTokenStatusInput, SettingsDto, TokenDto,
-    UpdateConnectionInput, UpdateSettingsInput, UpdateTokenInput,
+    CreatedTokenDto, DraftConnectionTestInput, ExportResultDto, GrantDto, HostKeyDto,
+    McpConfigInput, McpStatusDto, OverviewDto, PageDto, PageRequestDto, ProtocolInfoDto,
+    SessionDto, SessionFilterDto, SetGrantInput, SetTokenStatusInput, SettingsDto, TokenDto,
+    TrustHostKeyInput, UpdateConnectionInput, UpdateSettingsInput, UpdateTokenInput,
 };
 use crate::services;
 use crate::services::state::AppState;
@@ -98,6 +98,29 @@ pub async fn test_connection_draft(
     input: DraftConnectionTestInput,
 ) -> Result<ConnectionTestDto, ApiError> {
     Ok(services::connections::test_draft(state.inner(), input).await?)
+}
+
+// ---------------- SSH Host Key 信任 ----------------
+
+#[tauri::command]
+pub async fn list_host_keys(state: State<'_, AppState>) -> Result<Vec<HostKeyDto>, ApiError> {
+    Ok(services::host_keys::list(state.inner()).await?)
+}
+
+#[tauri::command]
+pub async fn trust_host_key(
+    state: State<'_, AppState>,
+    input: TrustHostKeyInput,
+) -> Result<HostKeyDto, ApiError> {
+    Ok(services::host_keys::trust(state.inner(), input).await?)
+}
+
+#[tauri::command]
+pub async fn delete_host_key(
+    state: State<'_, AppState>,
+    endpoint: String,
+) -> Result<bool, ApiError> {
+    Ok(services::host_keys::delete(state.inner(), &endpoint).await?)
 }
 
 // ---------------- 访问控制 ----------------

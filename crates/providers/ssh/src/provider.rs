@@ -10,8 +10,8 @@ use tokio::net::TcpStream;
 use umt_core::{Capability, CapabilitySet, ConnectionConfig};
 use umt_protocol_api::{
     ConfigField, ConfigSchema, ConnectOptions, ConnectionTestResult, FieldCondition, FieldKind,
-    FieldValidation, ProtocolDescriptor, ProtocolProvider, ProviderError, SelectOption,
-    TerminalSession, TestStep, TestStepStatus,
+    FieldValidation, HostKeyInfo, ProtocolDescriptor, ProtocolProvider, ProviderError,
+    SelectOption, TerminalSession, TestStep, TestStepStatus,
 };
 
 use crate::config::{AuthType, SshAuth, SshConfig, resolve_auth, resolve_auth_from_config};
@@ -181,6 +181,10 @@ impl ProtocolProvider for SshProvider {
             Ok(Ok(handle)) => handle,
         };
         let fingerprint = observed.lock().ok().and_then(|slot| slot.clone());
+        let observed_host_key = fingerprint.clone().map(|fingerprint| HostKeyInfo {
+            fingerprint,
+            algorithm: None,
+        });
         steps.push(TestStep {
             name: "Host Key 校验".into(),
             status: TestStepStatus::Passed,
@@ -205,7 +209,8 @@ impl ProtocolProvider for SshProvider {
                     "SSH 认证超时",
                     Some("检查服务器负载与网络延迟，或适当增大连接超时".into()),
                     steps,
-                ));
+                )
+                .with_host_key(observed_host_key.clone()));
             }
             Ok(Err(err)) => {
                 steps.push(TestStep::failed("SSH 认证", err.to_string()));
@@ -216,7 +221,8 @@ impl ProtocolProvider for SshProvider {
                     format!("SSH 认证失败：{err}"),
                     Some(auth_suggestion(parsed.auth_type)),
                     steps,
-                ));
+                )
+                .with_host_key(observed_host_key.clone()));
             }
             Ok(Ok(())) => {}
         }
@@ -232,11 +238,10 @@ impl ProtocolProvider for SshProvider {
             Some(fingerprint) => format!("SSH 认证成功（Host Key {fingerprint}）"),
             None => "SSH 认证成功".to_string(),
         };
-        Ok(ConnectionTestResult::success(
-            message,
-            started.elapsed().as_millis() as u64,
-            steps,
-        ))
+        Ok(
+            ConnectionTestResult::success(message, started.elapsed().as_millis() as u64, steps)
+                .with_host_key(observed_host_key),
+        )
     }
 }
 

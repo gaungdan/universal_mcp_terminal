@@ -1,10 +1,16 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { getSettings, updateMcpSettings, updateSettings } from "../../api/client";
+import {
+  deleteHostKey,
+  getSettings,
+  listHostKeys,
+  updateMcpSettings,
+  updateSettings,
+} from "../../api/client";
 import type { McpStatusDto, SettingsDto } from "../../api/types";
 import SectionCard from "../../components/SectionCard";
 import StatusBadge from "../../components/StatusBadge";
-import { toUserMessage } from "../../lib/errors";
+import { formatUnixMillis, toUserMessage } from "../../lib/errors";
 import { useAsync } from "../../lib/useAsync";
 import "./settings.css";
 
@@ -331,6 +337,76 @@ function SettingsForm({ initial }: SettingsFormProps) {
   );
 }
 
+function HostKeysSection() {
+  const query = useAsync(() => listHostKeys(), []);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const handleDelete = async (endpoint: string) => {
+    setBusy(endpoint);
+    setNotice(null);
+    try {
+      const deleted = await deleteHostKey(endpoint);
+      setNotice(deleted ? `已撤销 ${endpoint} 的信任` : `${endpoint} 不存在`);
+      query.reload();
+    } catch (error) {
+      setNotice(toUserMessage(error));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <SectionCard
+      title="已信任的 SSH Host Key"
+      description="撤销后，该主机下次连接会重新要求人工确认指纹。"
+    >
+      {query.error ? (
+        <p className="settings__alert settings__alert--danger" role="alert">
+          {toUserMessage(query.error)}
+        </p>
+      ) : null}
+
+      {query.loading && !query.data ? (
+        <p className="settings__note">正在加载 Host Key…</p>
+      ) : null}
+
+      {query.data && query.data.length === 0 ? (
+        <p className="settings__note">尚未信任任何主机指纹。</p>
+      ) : null}
+
+      {query.data && query.data.length > 0 ? (
+        <div className="settings__table" role="table" aria-label="已信任的 Host Key">
+          {query.data.map((record) => (
+            <div className="settings__table-row" role="row" key={record.endpoint}>
+              <span role="cell">
+                <strong>{record.endpoint}</strong>
+                <br />
+                <code style={{ wordBreak: "break-all" }}>{record.fingerprint}</code>
+              </span>
+              <span role="cell">{formatUnixMillis(record.trustedAt)}</span>
+              <button
+                type="button"
+                className="btn btn--danger btn--small"
+                onClick={() => void handleDelete(record.endpoint)}
+                disabled={busy === record.endpoint}
+              >
+                {busy === record.endpoint ? "撤销中…" : "撤销信任"}
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {notice ? (
+        <p className="settings__alert settings__alert--success" role="status">
+          {notice}
+        </p>
+      ) : null}
+    </SectionCard>
+  );
+}
+
 export default function SettingsPage() {
   const settingsQuery = useAsync(() => getSettings(), []);
 
@@ -365,6 +441,8 @@ export default function SettingsPage() {
           initial={settingsQuery.data}
         />
       ) : null}
+
+      <HostKeysSection />
     </section>
   );
 }

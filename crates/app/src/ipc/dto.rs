@@ -386,5 +386,27 @@ pub struct OverviewDto {
     pub recent_audits: Vec<AuditDto>,
 }
 
+/// 已信任的 SSH Host Key。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostKeyDto {
+    pub endpoint: String,
+    pub host: String,
+    pub port: u16,
+    pub algorithm: Option<String>,
+    pub fingerprint: String,
+    pub trusted_at: UnixMillis,
+    pub trusted_by: Option<String>,
+}
+
+/// 信任某个连接的 Host Key。`endpoint` 由后端根据连接配置推导，前端不参与拼接。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrustHostKeyInput {
+    pub connection_id: String,
+    pub fingerprint: String,
+    pub algorithm: Option<String>,
+}
+
 /// 应用事件负载，事件名固定为 `umt://event`。
 pub type AppEventDto = AppEvent;

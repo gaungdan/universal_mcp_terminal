@@ -118,11 +118,13 @@ impl McpServer {
                 transport_config,
             );
         let access = self.deps.access.clone();
+        let audit = self.deps.audit.clone();
         let router = Router::new()
             .nest_service("/mcp", http_service)
             .layer(middleware::from_fn(
                 move |request: Request<Body>, next: Next| {
                     let access = access.clone();
+                    let audit = audit.clone();
                     async move {
                         let bearer = request
                             .headers()
@@ -133,11 +135,15 @@ impl McpServer {
                             .filter(|token| !token.is_empty());
 
                         let Some(bearer) = bearer else {
+                            record_denied(&audit, "缺少 Bearer Token").await;
                             return unauthorized("缺少 Bearer Token");
                         };
                         match access.authenticate(bearer, None).await {
                             Ok(_context) => next.run(request).await,
-                            Err(error) => unauthorized(&error.to_string()),
+                            Err(error) => {
+                                record_denied(&audit, &error.to_string()).await;
+                                unauthorized(&error.to_string())
+                            }
                         }
                     }
                 },
@@ -225,6 +231,31 @@ fn lock(state: &Mutex<ServerState>) -> MutexGuard<'_, ServerState> {
     match state.lock() {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
+/// 记录鉴权失败的审计。失败只记日志，不能影响 401 响应。
+async fn record_denied(audit: &umt_audit::AuditService, message: &str) {
+    use umt_core::{AuditKind, AuditOutcome, ExecutionState, UnixMillis};
+    let entry = umt_persistence::NewAuditEntry {
+        session_id: None,
+        token_id: None,
+        connection_id: None,
+        kind: AuditKind::PermissionDenied,
+        outcome: AuditOutcome::Denied,
+        command: Some("mcp_http.authenticate".to_string()),
+        working_dir: None,
+        started_at: UnixMillis::now(),
+        duration_ms: None,
+        state: ExecutionState::Failed,
+        exit_code: None,
+        stdout_excerpt: None,
+        stderr_excerpt: None,
+        error: Some(message.to_string()),
+        redacted: false,
+    };
+    if let Err(err) = audit.record(entry).await {
+        tracing::warn!(error = %err, "写入鉴权失败审计失败");
     }
 }
 

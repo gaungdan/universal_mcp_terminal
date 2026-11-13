@@ -20,9 +20,10 @@ use rmcp::{ErrorData, RoleServer, ServerHandler};
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use umt_core::{
-    Capability, CapabilitySet, Connection, ConnectionConfig, ConnectionId, PageRequest, SessionId,
-    SessionInfo, TokenContext, UmtError,
+    AuditKind, AuditOutcome, Capability, CapabilitySet, Connection, ConnectionConfig, ConnectionId,
+    ExecutionState, PageRequest, SessionId, SessionInfo, TokenContext, UmtError, UnixMillis,
 };
+use umt_persistence::NewAuditEntry;
 use umt_protocol_api::{ExecRequest, ExecResult, ProtocolProvider, SecretValues};
 use umt_security::EncryptedSecret;
 use umt_session_manager::OpenSessionRequest;
@@ -56,7 +57,31 @@ impl UmtMcpServer {
     /// 工具分发的核心入口。抽出为独立方法便于不经 HTTP 直接测试。
     ///
     /// `token` 必须来自 `AccessControl::authenticate`，禁止由工具参数构造。
+    /// 越权与能力不支持的失败会额外写入一条 `permission_denied` 审计，
+    /// 但审计写入失败不会掩盖原始错误。
     pub async fn execute_tool(
+        &self,
+        token: &TokenContext,
+        name: &str,
+        args: &JsonObject,
+    ) -> Result<Value, UmtError> {
+        let result = self.dispatch_tool(token, name, args).await;
+        match &result {
+            Err(error)
+                if matches!(
+                    error,
+                    UmtError::AccessDenied(_) | UmtError::UnsupportedCapability(_)
+                ) =>
+            {
+                self.record_permission_denied(Some(token), name, args, error)
+                    .await;
+            }
+            _ => {}
+        }
+        result
+    }
+
+    async fn dispatch_tool(
         &self,
         token: &TokenContext,
         name: &str,
@@ -76,6 +101,39 @@ impl UmtMcpServer {
                 entity: "工具",
                 id: other.to_string(),
             }),
+        }
+    }
+
+    /// 写入一条权限拒绝审计。`token` 为 `None` 表示认证阶段就失败了。
+    ///
+    /// `command` 只包含工具名与连接/会话标识，绝不拼接命令、输入或凭据；
+    /// `error` 由 `AuditService` 再次脱敏。审计失败只告警，不影响返回的原始错误。
+    async fn record_permission_denied(
+        &self,
+        token: Option<&TokenContext>,
+        name: &str,
+        args: &JsonObject,
+        error: &UmtError,
+    ) {
+        let entry = NewAuditEntry {
+            session_id: None,
+            token_id: token.map(|context| context.token_id),
+            connection_id: None,
+            kind: AuditKind::PermissionDenied,
+            outcome: AuditOutcome::Denied,
+            command: Some(denied_command(name, args)),
+            working_dir: None,
+            started_at: UnixMillis::now(),
+            duration_ms: None,
+            state: ExecutionState::Failed,
+            exit_code: None,
+            stdout_excerpt: None,
+            stderr_excerpt: None,
+            error: Some(error.to_string()),
+            redacted: false,
+        };
+        if let Err(audit_error) = self.deps.audit.record(entry).await {
+            tracing::warn!(error = %audit_error, tool = name, "权限拒绝审计写入失败");
         }
     }
 
@@ -519,16 +577,28 @@ impl ServerHandler for UmtMcpServer {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         // 鉴权信息只允许来自 HTTP header，绝不相信工具参数。
-        let bearer = bearer_from_context(&context).map_err(to_mcp_error)?;
-        let client_info = user_agent(&context);
-        let token = self
-            .deps
-            .access
-            .authenticate(bearer, client_info)
-            .await
-            .map_err(to_mcp_error)?;
-
         let name = request.name.to_string();
+        let args = request.arguments.unwrap_or_default();
+        let client_info = user_agent(&context);
+
+        // 认证失败时拿不到 Token 上下文，审计里的 token_id 为 None。
+        let bearer = match bearer_from_context(&context) {
+            Ok(bearer) => bearer,
+            Err(error) => {
+                self.record_permission_denied(None, &name, &args, &error)
+                    .await;
+                return Err(to_mcp_error(error));
+            }
+        };
+        let token = match self.deps.access.authenticate(bearer, client_info).await {
+            Ok(token) => token,
+            Err(error) => {
+                self.record_permission_denied(None, &name, &args, &error)
+                    .await;
+                return Err(to_mcp_error(error));
+            }
+        };
+
         if !tools::TOOL_NAMES.contains(&name.as_str()) {
             return Err(ErrorData::new(
                 ErrorCode::METHOD_NOT_FOUND,
@@ -537,7 +607,6 @@ impl ServerHandler for UmtMcpServer {
             ));
         }
 
-        let args = request.arguments.unwrap_or_default();
         let payload = self
             .execute_tool(&token, &name, &args)
             .await
@@ -581,6 +650,20 @@ fn user_agent(context: &RequestContext<RoleServer>) -> Option<String> {
         .and_then(|parts| parts.headers.get(http::header::USER_AGENT))
         .and_then(|value| value.to_str().ok())
         .map(str::to_string)
+}
+
+/// 权限拒绝审计里的命令摘要：工具名 + 白名单内的标识参数。
+///
+/// 只收录 `connection_id` / `session_id` 这类非敏感定位信息，
+/// 不包含命令正文、输入内容或任何凭据。
+fn denied_command(name: &str, args: &JsonObject) -> String {
+    let mut summary = name.to_string();
+    for key in ["connection_id", "session_id"] {
+        if let Some(Value::String(value)) = args.get(key) {
+            summary.push_str(&format!(" {key}={value}"));
+        }
+    }
+    summary
 }
 
 fn to_mcp_error(error: UmtError) -> ErrorData {
@@ -674,8 +757,8 @@ fn exec_value(info: &SessionInfo, result: &ExecResult) -> Value {
 mod tests {
     use super::*;
     use serde_json::json;
-    use umt_core::UmtError;
-    use umt_persistence::{SecretBlob, SecretRepo, SessionRepo};
+    use umt_core::{AuditKind, AuditOutcome, AuditQuery, ExecutionState, UmtError};
+    use umt_persistence::{AuditRepo, SecretBlob, SecretRepo, SessionRepo};
 
     use crate::testing::TestEnv;
 
@@ -721,6 +804,58 @@ mod tests {
             .await
             .expect_err("未授权连接必须被拒绝");
         assert_eq!(error.code(), "access_denied");
+    }
+
+    #[tokio::test]
+    async fn unauthorized_connection_writes_permission_denied_audit() {
+        let env = TestEnv::new();
+        let server = env.server();
+        let token = env.token("claude").await;
+        let connection = env.connection("prod", "mock").await;
+        env.configure(connection.id, "mock", json!({ "host": "local" }));
+
+        let error = server
+            .execute_tool(
+                &token,
+                tools::GET_CONNECTION_INFO,
+                &args(json!({ "connection_id": connection.id.to_string() })),
+            )
+            .await
+            .expect_err("未授权连接必须被拒绝");
+        assert_eq!(error.code(), "access_denied");
+
+        let page = env
+            .repos
+            .audit
+            .query(&AuditQuery {
+                kind: Some(AuditKind::PermissionDenied),
+                outcome: Some(AuditOutcome::Denied),
+                ..AuditQuery::default()
+            })
+            .await
+            .expect("查询审计失败");
+        assert_eq!(page.total, 1, "权限拒绝必须落一条审计");
+        let record = &page.items[0];
+        assert_eq!(
+            record.token_id,
+            Some(token.token_id),
+            "已认证时应记录 Token"
+        );
+        assert_eq!(record.state, ExecutionState::Failed);
+        assert!(record.error.is_some(), "应记录拒绝原因");
+        let command = record.command.as_deref().expect("缺少 command 摘要");
+        assert!(
+            command.starts_with(tools::GET_CONNECTION_INFO),
+            "摘要应以工具名开头：{command}"
+        );
+        assert!(
+            command.contains(&connection.id.to_string()),
+            "摘要应包含被拒绝的连接 ID：{command}"
+        );
+        assert!(
+            !command.to_lowercase().contains("bearer"),
+            "摘要不得包含凭据：{command}"
+        );
     }
 
     #[tokio::test]

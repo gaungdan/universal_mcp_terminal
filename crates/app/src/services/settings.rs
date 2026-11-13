@@ -1,7 +1,10 @@
 //! 系统设置与首页概览。
 
+use std::time::Duration;
+
 use umt_core::{AuditQuery, PageRequest, UmtError};
 use umt_persistence::{ConnectionFilter, ConnectionRepo, SessionRepo, SettingsRepo, TokenRepo};
+use umt_session_manager::{CommandPolicy, ExecutionMode, SessionLimits};
 
 use crate::ipc::dto::{OverviewDto, SettingsDto};
 use crate::services::audit::to_dto;
@@ -11,7 +14,6 @@ use crate::services::state::{
     KEY_REQUIRE_CONFIRMATION, KEY_SESSION_TIMEOUT,
 };
 
-const EXECUTION_MODES: [&str; 3] = ["ReadOnly", "Restricted", "FullAccess"];
 const LOG_LEVELS: [&str; 4] = ["info", "debug", "warn", "error"];
 const RECENT_AUDIT_LIMIT: u32 = 5;
 
@@ -47,11 +49,13 @@ pub async fn update(
     state: &AppState,
     input: crate::ipc::dto::UpdateSettingsInput,
 ) -> Result<SettingsDto, UmtError> {
-    if !EXECUTION_MODES.contains(&input.security.default_execution_mode.as_str()) {
-        return Err(UmtError::Validation(
-            "默认执行模式必须是 ReadOnly / Restricted / FullAccess".into(),
-        ));
-    }
+    let mode = input
+        .security
+        .default_execution_mode
+        .parse::<ExecutionMode>()
+        .map_err(|_| {
+            UmtError::Validation("默认执行模式必须是 ReadOnly / Restricted / FullAccess".into())
+        })?;
     if input.security.session_timeout_secs == 0 {
         return Err(UmtError::Validation("Session 超时时间必须大于 0".into()));
     }
@@ -82,7 +86,17 @@ pub async fn update(
         )
         .await?;
     state.set_setting(KEY_LOG_LEVEL, &log_level).await?;
-    // 会话超时只影响之后创建的 SessionManager；重启应用后完全生效。
+
+    // 保存成功后立即热更新运行中的 SessionManager：策略与超时都无需重启应用。
+    state.sessions.set_policy(CommandPolicy {
+        mode,
+        require_confirmation_for_high_risk: input.security.require_confirmation_for_high_risk,
+        ..CommandPolicy::default()
+    });
+    state.sessions.set_limits(SessionLimits {
+        idle_timeout: Duration::from_secs(input.security.session_timeout_secs),
+        ..SessionLimits::default()
+    });
 
     get(state).await
 }

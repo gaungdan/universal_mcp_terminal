@@ -317,8 +317,18 @@ Wave 3 (并行): T20 | T21
 | T20 | ✅ | 真实 HTTP 端到端 + 权限矩阵；发现并修复 HTTP 层未鉴权缺口 |
 | T21 | ✅ | 架构、MCP 接入、协议开发文档 + 测试报告 |
 
-**当前门禁**：`cargo fmt --check`、`cargo clippy --workspace --all-targets -D warnings`、`cargo test --workspace`（168 passed / 1 ignored）、前端 typecheck / lint / test（66）/ build 全通过。
+**当前门禁**：`cargo fmt --check`、`cargo clippy --workspace --all-targets -D warnings`、`cargo test --workspace`（180 passed / 1 ignored）、前端 typecheck / lint / test（66）/ build 全通过。
 
-**仍未覆盖**：SSH 真实连接需环境变量；高风险操作确认策略尚未在 MCP/SessionManager 落地；`audit_events.outcome` 需新迁移补列。
+### 收口补强（2026-11-13）
+
+| 项 | 状态 | 说明 |
+|---|---|---|
+| SSH Host Key 信任链 | ✅ | 新增 `list_host_keys` / `trust_host_key` / `delete_host_key`，连接详情页确认指纹，设置页可撤销 |
+| 安全执行策略 | ✅（无交互确认） | `CommandPolicy` 接入 `SessionManager::exec`，ReadOnly/Restricted/FullAccess + 高风险识别，拒绝即写审计；MCP 无确认通道，一律拒绝 |
+| 权限拒绝审计 | ✅ | 工具层越权/能力不支持 + HTTP 层鉴权失败都会写 `permission_denied` |
+| `audit_events.outcome` | ✅ | 迁移 0002 拆列并回填旧编码数据 |
+| 设置热更新 | ✅ | 执行模式、Session 超时修改后即时生效 |
+
+**仍未覆盖**：SSH/Telnet 真实环境联调（SSH 用例需环境变量）、MCP 官方客户端兼容性验证、安装包与 CI。
 
 **已知技术债**：`audit_events` 冻结表结构没有独立 `outcome` 列，T6 暂时把 `outcome|state` 编码进 `status`，读写已封装在 `src/repo/sqlite/audit.rs`。后续用新迁移补列并回填，不要在旧迁移上直接改。

@@ -21,4 +21,4 @@ pub use schema::{
 pub use session::{
     ConnectOptions, ExecRequest, ExecResult, OutputChunk, SecretValues, TerminalSession,
 };
-pub use test_result::{ConnectionTestResult, TestStep, TestStepStatus};
+pub use test_result::{ConnectionTestResult, HostKeyInfo, TestStep, TestStepStatus};

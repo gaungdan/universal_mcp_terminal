@@ -17,7 +17,7 @@ use umt_provider_ssh::SshProvider;
 use umt_provider_telnet::TelnetProvider;
 use umt_provider_wsl::WslProvider;
 use umt_security::{AesGcmCipher, KeyStore, OsKeyStore, SecretCipher, TokenService};
-use umt_session_manager::{SessionLimits, SessionManager};
+use umt_session_manager::{CommandPolicy, ExecutionMode, SessionLimits, SessionManager};
 
 use crate::services::secrets::{load_secret_map, store_secret_map};
 use crate::services::store::{ConnectionConfigStore, McpConnectionSource};
@@ -102,21 +102,13 @@ impl AppState {
         ));
         let audit = Arc::new(AuditService::new(repos.audit.clone()));
 
-        let idle_timeout_secs = repos
-            .settings
-            .get(KEY_SESSION_TIMEOUT)
-            .await?
-            .and_then(|value| value.parse::<u64>().ok())
-            .filter(|secs| *secs > 0)
-            .unwrap_or(DEFAULT_SESSION_TIMEOUT_SECS);
+        let (policy, limits) = read_security_config(&repos).await?;
         let sessions = Arc::new(SessionManager::new(
             repos.sessions.clone(),
             audit.clone(),
-            SessionLimits {
-                max_sessions: 32,
-                idle_timeout: Duration::from_secs(idle_timeout_secs),
-            },
+            limits,
         ));
+        sessions.set_policy(policy);
         access.set_revoker(sessions.clone());
 
         let mut registry = ProtocolRegistry::new();
@@ -227,6 +219,43 @@ pub async fn read_mcp_config(repos: &SqliteRepos) -> Result<McpServerConfig, Umt
         .filter(|port| *port > 0)
         .unwrap_or(DEFAULT_MCP_PORT);
     Ok(McpServerConfig { host, port })
+}
+
+/// 读取安全执行策略与 Session 限制；非法值回退到安全默认（Restricted）。
+pub async fn read_security_config(
+    repos: &SqliteRepos,
+) -> Result<(CommandPolicy, SessionLimits), UmtError> {
+    let mode = repos
+        .settings
+        .get(KEY_EXECUTION_MODE)
+        .await?
+        .and_then(|value| value.trim().parse::<ExecutionMode>().ok())
+        .unwrap_or_default();
+    let require_confirmation = repos
+        .settings
+        .get(KEY_REQUIRE_CONFIRMATION)
+        .await?
+        .map(|value| value.trim() != "false")
+        .unwrap_or(true);
+    let idle_timeout_secs = repos
+        .settings
+        .get(KEY_SESSION_TIMEOUT)
+        .await?
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|secs| *secs > 0)
+        .unwrap_or(DEFAULT_SESSION_TIMEOUT_SECS);
+
+    Ok((
+        CommandPolicy {
+            mode,
+            require_confirmation_for_high_risk: require_confirmation,
+            ..CommandPolicy::default()
+        },
+        SessionLimits {
+            idle_timeout: Duration::from_secs(idle_timeout_secs),
+            ..SessionLimits::default()
+        },
+    ))
 }
 
 /// 首次启动写入默认设置；已有值绝不覆盖。

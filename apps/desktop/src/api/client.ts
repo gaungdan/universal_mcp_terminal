@@ -16,6 +16,7 @@ import type {
   DraftConnectionTestInput,
   ExportResultDto,
   GrantDto,
+  HostKeyDto,
   McpConfigInput,
   McpStatusDto,
   OverviewDto,
@@ -28,6 +29,7 @@ import type {
   SetTokenStatusInput,
   SettingsDto,
   TokenDto,
+  TrustHostKeyInput,
   UpdateConnectionInput,
   UpdateSettingsInput,
   UpdateTokenInput,
@@ -79,6 +81,20 @@ export function testConnectionDraft(
   input: DraftConnectionTestInput,
 ): Promise<ConnectionTestResult> {
   return invoke<ConnectionTestResult>("test_connection_draft", { input });
+}
+
+// ---------------- SSH Host Key 信任 ----------------
+
+export function listHostKeys(): Promise<HostKeyDto[]> {
+  return invoke<HostKeyDto[]>("list_host_keys");
+}
+
+export function trustHostKey(input: TrustHostKeyInput): Promise<HostKeyDto> {
+  return invoke<HostKeyDto>("trust_host_key", { input });
+}
+
+export function deleteHostKey(endpoint: string): Promise<boolean> {
+  return invoke<boolean>("delete_host_key", { endpoint });
 }
 
 // ---------------- 访问控制 ----------------

@@ -234,6 +234,12 @@ pub trait HostKeyRepo: Send + Sync {
 
     /// 按 `endpoint` 插入或整行覆盖。
     async fn upsert(&self, record: HostKeyRecord) -> Result<(), PersistenceError>;
+
+    /// 删除已信任的指纹，返回是否真的删除了记录。
+    async fn delete(&self, endpoint: &str) -> Result<bool, PersistenceError>;
+
+    /// 全部已信任指纹，按 trusted_at 倒序。
+    async fn list(&self) -> Result<Vec<HostKeyRecord>, PersistenceError>;
 }
 
 pub mod sqlite;

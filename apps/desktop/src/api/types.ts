@@ -151,6 +151,29 @@ export type ConnectionTestResult = {
   latencyMs?: number | null;
   steps: TestStep[];
   suggestion?: string | null;
+  /** 握手阶段观察到的 Host Key，可用于引导用户信任。 */
+  hostKey?: HostKeyInfo | null;
+};
+
+export type HostKeyInfo = {
+  fingerprint: string;
+  algorithm?: string | null;
+};
+
+export type HostKeyDto = {
+  endpoint: string;
+  host: string;
+  port: number;
+  algorithm?: string | null;
+  fingerprint: string;
+  trustedAt: number;
+  trustedBy?: string | null;
+};
+
+export type TrustHostKeyInput = {
+  connectionId: string;
+  fingerprint: string;
+  algorithm?: string | null;
 };
 
 // ---------------- Token 与授权 ----------------

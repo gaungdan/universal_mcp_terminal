@@ -33,28 +33,25 @@
 | `umt-protocol-api` | 9 | 0 | Schema 校验、错误映射、MockProvider |
 | `umt-protocol-registry` | 2 | 0 | 注册、重复注册拒绝 |
 | `umt-security` | 12 | 0 | AES-GCM、Token HMAC、Host Key 三态 |
-| `umt-persistence` | 20 | 0 | 重启恢复、过滤分页、乐观锁、授权、审计、Host Key |
+| `umt-persistence` | 22 | 0 | 重启恢复、过滤分页、乐观锁、授权、审计、Host Key、0002 迁移 |
 | `umt-audit` | 6 | 0 | 脱敏、CSV 导出 |
 | `umt-access-control` | 6 | 0 | Token 生命周期、授权矩阵、撤销联动 |
-| `umt-session-manager` | 6 | 0 | 状态机、跨 Token 隔离、空闲回收、上限 |
+| `umt-session-manager` | 14 | 0 | 状态机、跨 Token 隔离、空闲回收、执行策略（6 个策略用例） |
 | `umt-provider-ssh`（单元） | 19 | 0 | Schema、能力、配置校验 |
 | `umt-provider-ssh`（`tests/real_connection.rs`） | 0 | 1 | 真实 SSH 连接测试，需 `UMT_TEST_SSH_*` 环境变量 |
 | `umt-provider-telnet`（单元） | 4 | 0 | 能力、Schema、配置 |
 | `umt-provider-telnet`（`tests/telnet_provider.rs`） | 12 | 0 | 假设备登录、exec、分页、超时、resize 拒绝 |
 | `umt-provider-wsl` | 29 | 0 | 发行版枚举、UTF-16LE 解码、exec、超时、进程树清理、真实 WSL |
-| `umt-mcp-server`（单元） | 14 | 0 | Bearer 解析、越权、能力、临时会话、密钥版本 |
+| `umt-mcp-server`（单元） | 15 | 0 | Bearer 解析、越权审计、能力、临时会话、密钥版本 |
 | `umt-mcp-server`（`tests/http_e2e.rs`） | 8 | 0 | 真实 HTTP + Streamable HTTP；含未认证 `initialize` / `tools/list` 被 401 拒绝 |
-| `umt-app`（`tests/services.rs`） | 3 | 0 | 重启恢复、密文往返、未授权拒绝 |
+| `umt-app`（`tests/services.rs`） | 4 | 0 | 重启恢复、密文往返、未授权拒绝、Host Key 信任往返 |
 | `umt-app` / `umt-desktop` / doc-tests | 0 | 0 | 无独立单测 |
-| **合计** | **168** | **1** | 0 failed |
+| **合计** | **180** | **1** | 0 failed |
 
-忽略的 2 个用例：
+忽略的 1 个用例：
 
 1. `umt-provider-ssh::real_ssh_test_connect_exec_and_interactive_shell`
    —— 需要 `UMT_TEST_SSH_HOST/PORT/USER/PASSWORD`，通过 `cargo test -p umt-provider-ssh -- --ignored` 运行。
-2. `umt-mcp-server::unauthenticated_initialize_and_tools_list_must_be_rejected`
-   —— 原 T20-GAP-1 已修复：`/mcp` 路由前置 Bearer 中间件，未认证请求返回 401；
-   该用例已转正常执行并通过。
 
 ### 2.2 前端（Vitest）
 
@@ -83,7 +80,7 @@ src/pages/connections/ConnectionsPage.test 10
 | 2 | 重启后 Token 仍然存在 | **已覆盖** | 同上，Token 与 HMAC 一起校验 |
 | 3 | 重启后连接授权关系仍然存在 | **已覆盖** | 同上，重启后 `is_allowed` 与授权列表均保留 |
 | 4 | 重启后审计记录仍然存在 | **已覆盖** | `data_survives_restart` 写入并重新读取 `AuditKind::SessionOpened` |
-| 5 | 数据升级不会无故丢失 | **部分覆盖** | 只有 v1 迁移，`sqlx::migrate!` 保证已发布迁移不可改写；但没有 v1→v2 升级/回填的自动化用例 |
+| 5 | 数据升级不会无故丢失 | **部分覆盖** | 新增 0002 迁移与旧数据回填用例（`migration_splits_legacy_status_encoding`）；但只有 v1→v2 一条升级路径，没有回滚用例 |
 
 ### 3.2 协议
 
@@ -132,6 +129,10 @@ src/pages/connections/ConnectionsPage.test 10
 | 6 | 敏感信息得到脱敏 | **已覆盖** | `Redactor` 单测覆盖 password、Bearer、`umt_` Token、PEM 私钥、SSH 公钥 |
 | 7 | 审计记录持久化 | **已覆盖** | SQLite `data_survives_restart`；审计仓库只追加 |
 
+补充：权限拒绝事件已落库（`kind = permission_denied`、`outcome = denied`），
+由 `unauthorized_connection_writes_permission_denied_audit` 覆盖；`outcome` 已成为独立列，
+按结果过滤直接命中该列。
+
 ### 3.6 安全
 
 | # | 验收项 | 结论 | 依据/原因 |
@@ -141,14 +142,15 @@ src/pages/connections/ConnectionsPage.test 10
 | 3 | 私钥不能进入普通日志 | **已覆盖（代码审查）** | 无日志打印私钥；`Redactor` 覆盖 PEM 块；SSH Provider 只把私钥用于 `decode_secret_key` |
 | 4 | 未授权操作被后端拒绝 | **已覆盖** | 工具层 `authorize_connection` + 会话归属校验；e2e 越权矩阵 |
 | 5 | Token 撤销后活动 Session 被终止 | **已覆盖** | `SessionManager::revoke_token_sessions` 单测；关闭原因 `token_revoked` |
-| 6 | 高风险操作按策略要求用户确认 | **未覆盖** | `security.default_execution_mode` 与 `require_confirmation_for_high_risk` 只被设置/展示，MCP/SessionManager 没有执行策略或二次确认拦截 |
+| 6 | 高风险操作按策略要求用户确认 | **部分覆盖** | `CommandPolicy` 已按 ReadOnly/Restricted/FullAccess 拦截命令，高风险命令写 `permission_denied` 审计并拒绝；MCP 通道暂无交互式确认，`NeedsConfirmation` 统一按拒绝处理 |
+| 7 | Host Key 确认与指纹固定 | **已覆盖** | 连接测试返回观察到的指纹；`trust_host_key` / `list_host_keys` / `delete_host_key` 三个 IPC 命令 + 连接详情页确认按钮 + 设置页撤销，`host_key_trust_list_and_revoke_roundtrip` 覆盖往返 |
 
 ## 四、已知技术债与缺口
 
-1. **`audit_events.outcome` 编码**
-   v1 表没有独立 `outcome` 列，SQLite 仓库把 `outcome|state` 写入 `status` 列
-   （`crates/persistence/src/repo/sqlite/audit.rs` 的 `encode_status` / `decode_status`）。
-   读写已封装，但 SQL 层可读性差；后续应新增迁移补列并回填。
+1. **`audit_events.outcome` 编码（已修复）**
+   0002 迁移新增独立 `outcome` 列并把旧 `status`（`allowed|succeeded`）拆分为
+   `outcome` + `status`；SQLite 仓库的写入、过滤、读取均直接使用该列，`status` 只保存执行状态。
+   回归用例：`migration_splits_legacy_status_encoding`、`audit_outcome_filter_matches_dedicated_column`。
 
 2. **MCP HTTP 层认证（已修复）**
    已在 `/mcp` 路由前置 Bearer 中间件（`crates/mcp-server/src/service.rs`），
@@ -162,23 +164,28 @@ src/pages/connections/ConnectionsPage.test 10
    `list_distributions` 在非 Windows 返回 `ProviderError::Internal("仅支持 Windows")`；
    `WslProvider` 依赖 `wsl.exe`，无法在 Linux/macOS 构建上提供真实能力。
 
-5. **Host Key 桌面端确认流程缺失**
-   SSH 严格校验与「未知指纹拒绝」已实现，连接测试能返回指纹；但没有 Tauri 命令或 UI
-   把用户确认后的指纹写入 `ssh_host_keys`，因此 MCP 首次连接无法在应用内完成信任。
+5. **Host Key 桌面端确认流程（已修复）**
+   SSH 严格校验与「未知指纹拒绝」保持不变；新增 `list_host_keys` / `trust_host_key` /
+   `delete_host_key` 三个 Tauri 命令，连接详情页在测试结果中展示服务端指纹并可一键信任，
+   设置页可查看与撤销已信任指纹。`endpoint` 由后端按 `host:port` 推导，前端不拼接。
 
-6. **安全执行策略未落地**
-   `Restricted` / `ReadOnly` / `FullAccess` 与高风险确认设置只存在于设置表和设置页，
-   MCP 工具没有按策略拦截命令，也没有确认交互。这是需求 §10 与 §15 安全第 6 条的主要缺口。
+6. **安全执行策略（部分落地）**
+   `ReadOnly` / `Restricted` / `FullAccess` 与高风险识别已接入 `SessionManager::exec`，
+   拒绝时写 `PermissionDenied` 审计并立即生效；设置修改后热更新，不再需要重启。
+   限制：MCP 通道没有交互式确认能力，`NeedsConfirmation` 统一按拒绝处理；
+   字符串策略不能替代远端受限账号与系统权限控制。
 
-7. **审计完整性**
-   `read_output` 与 `resize_terminal` 不写审计；`AuditKind::PermissionDenied` 已定义但未使用，
-   权限拒绝事件不会落库；`exec` 审计的 `working_dir` 固定为 `None`。
+7. **审计完整性（部分修复）**
+   `AuditKind::PermissionDenied` 已接入：MCP 越权与能力不支持失败会落
+   `permission_denied` / `denied` 审计（含认证失败时的 `token_id = None`）。
+   仍存在：`read_output` 与 `resize_terminal` 不写审计；`exec` 审计的 `working_dir` 固定为 `None`。
 
 8. **SSH 真实连接未进入默认门禁**
    测试 `#[ignore]`，CI/本地默认运行不会验证真实 SSH；需要提供测试服务器环境变量。
 
-9. **数据升级无自动化验证**
-   只有 v1 schema，没有从旧版本迁移、回填或回滚的测试。
+9. **数据升级无自动化验证（已补充 v1→v2）**
+   0002 迁移已有「旧库建表 → 写入旧编码 → 执行迁移 → 校验拆列」的自动化用例；
+   仍无回滚（down migration）验证。
 
 10. **MCP 兼容性测试范围**
     e2e 使用 `reqwest` 手工构造 JSON-RPC/SSE，未使用官方 MCP 客户端或 `mcp-inspector`。
@@ -222,3 +229,45 @@ src/pages/connections/ConnectionsPage.test 10
 1. 脱敏是**基于模式**的，未命中规则的自由文本仍可能进入审计（例如命令输出中的自定义密钥格式）。
 2. 错误信息若被 Provider 拼进凭据内容，仍可能泄露；当前 Provider 实现未这样做，但没有自动化“日志快照”测试兜底。
 3. 完整 Token 会短暂存在于创建响应与前端内存中，这是“仅展示一次”设计的必然结果；不应写入持久化存储或日志。
+
+## 六、审计缺口收口（2026-11-13 补充）
+
+### 6.1 迁移 0002：`outcome` 独立成列
+
+- 新增 `crates/persistence/migrations/0002_audit_outcome.sql`：
+  `ALTER TABLE audit_events ADD COLUMN outcome TEXT NOT NULL DEFAULT 'allowed'`；
+  用 `instr` / `substr` 把旧 `status`（形如 `allowed|succeeded`）拆成 `outcome` 与新的 `status`，
+  只处理分隔符位于中间的行；新增索引 `idx_audit_outcome`（`IF NOT EXISTS`）。
+- SQLite 仓库 `crates/persistence/src/repo/sqlite/audit.rs` 的写入、outcome 过滤与读取均使用独立列，
+  `status` 只保存 `ExecutionState`；读取保留一次兼容兜底，历史值 `allowed|succeeded` 取前缀。
+
+### 6.2 权限拒绝审计落点
+
+- `UmtMcpServer::execute_tool` 包装统一分发：返回 `UmtError::AccessDenied` 或
+  `UmtError::UnsupportedCapability` 时写入 `AuditKind::PermissionDenied` +
+  `AuditOutcome::Denied` + `ExecutionState::Failed`。
+- `command` 只包含工具名与 `connection_id` / `session_id`，不含命令正文、输入或凭据；
+  `error` 由 `AuditService` 二次脱敏；审计写入失败只 `tracing::warn!`，不覆盖原始错误。
+- `call_tool` 在认证阶段失败时也会写审计，`token_id = None`；HTTP 层 Bearer 中间件会在进入
+  rmcp 前直接返回 401，因此该分支仅在直接调用 handler 时触发。
+
+### 6.3 本次门禁与用例
+
+| 命令 | 结果 |
+|---|---|
+| `cargo fmt --all` | **通过**，无格式差异 |
+| `cargo test -p umt-persistence -j 1` | **通过**：22 passed / 0 failed（新增 2 个用例） |
+| `cargo test -p umt-mcp-server -j 1` | **通过**：单元 15 passed、`http_e2e` 8 passed，0 failed |
+| `cargo clippy -p umt-persistence -p umt-mcp-server --all-targets -j 1 -- -D warnings` | **被外部改动阻塞**：`crates/persistence/src/repo/memory.rs:707` 的 `sort_by` 触发 `clippy::unnecessary_sort_by`；该文件是并行工单的未提交改动，不在本工单写入范围。追加 `-A clippy::unnecessary_sort_by` 后，本工单涉及代码零 warning |
+
+新增用例：
+
+- `migration_splits_legacy_status_encoding`：用 0001 建旧库、写入 `allowed|succeeded`，执行 0002 后
+  校验 `outcome = allowed`、`status = succeeded`。
+- `audit_outcome_filter_matches_dedicated_column`：写入 allowed/denied 两条记录，
+  按 `outcome = Denied` 只命中一条，并确认 `status` 不再含 `|`。
+- `unauthorized_connection_writes_permission_denied_audit`：未授权连接调用后，
+  `AuditRepo::query` 命中一条 `permission_denied` / `denied` 记录，含 `token_id`、连接 ID 摘要与错误原因。
+
+非法 Token 由既有 e2e `invalid_bearer_token_is_rejected` 覆盖：请求在 `/mcp` Bearer 中间件被 401 拒绝，
+不会 panic；该路径未进入 handler，因此**不落审计**。

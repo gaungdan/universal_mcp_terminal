@@ -5,5 +5,9 @@
 #![deny(unsafe_code)]
 
 pub mod manager;
+pub mod policy;
 
 pub use manager::{OpenSessionRequest, SessionLimits, SessionManager};
+pub use policy::{
+    CommandPolicy, ExecutionMode, PolicyDecision, RiskLevel, classify_risk, is_read_only,
+};

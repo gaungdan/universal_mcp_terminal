@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use sqlx::sqlite::SqliteRow;
 use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 use umt_core::{
-    AuditId, AuditOutcome, AuditQuery, AuditRecord, ConnectionId, ExecutionState, Page, SessionId,
-    TokenId, UnixMillis,
+    AuditId, AuditOutcome, AuditQuery, AuditRecord, ConnectionId, Page, SessionId, TokenId,
+    UnixMillis,
 };
 
 use super::support::{
@@ -17,9 +17,9 @@ use crate::error::PersistenceError;
 use crate::models::NewAuditEntry;
 use crate::repo::AuditRepo;
 
-const AUDIT_COLUMNS: &str = "id, session_id, token_id, connection_id, kind, command, working_dir, \
-                             started_at, duration_ms, status, exit_code, stdout_excerpt, \
-                             stderr_excerpt, error, redacted";
+const AUDIT_COLUMNS: &str = "id, session_id, token_id, connection_id, kind, outcome, command, \
+                             working_dir, started_at, duration_ms, status, exit_code, \
+                             stdout_excerpt, stderr_excerpt, error, redacted";
 
 /// 审计事件的 SQLite 仓库。
 #[derive(Debug, Clone)]
@@ -33,32 +33,16 @@ impl SqliteAuditRepo {
     }
 }
 
-/// 审计结果与执行状态的联合编码分隔符。
+/// 读取 `outcome` 列。
 ///
-/// 冻结的 v1 建表没有 `outcome` 列，`status` 是唯一的状态文本列，
-/// 因此把「outcome|state」写入该列；读写都封装在本模块，对外仍暴露两个独立字段。
-const STATUS_SEPARATOR: char = '|';
-
-fn encode_status(outcome: AuditOutcome, state: ExecutionState) -> String {
-    format!(
-        "{}{STATUS_SEPARATOR}{}",
-        audit_outcome_to_str(outcome),
-        execution_state_to_str(state)
-    )
-}
-
-fn decode_status(raw: &str) -> Result<(AuditOutcome, ExecutionState), PersistenceError> {
-    let (outcome, state) = raw
-        .split_once(STATUS_SEPARATOR)
-        .ok_or_else(|| PersistenceError::backend("审计状态格式非法"))?;
-    Ok((
-        audit_outcome_from_str(outcome)?,
-        execution_state_from_str(state)?,
-    ))
+/// 0002 迁移前的历史数据可能把「outcome|state」写进了这里（例如人工插入的旧测试数据），
+/// 因此遇到分隔符时取前半段做一次兼容兜底；正常数据直接命中独立列。
+fn decode_outcome(raw: &str) -> Result<AuditOutcome, PersistenceError> {
+    let outcome = raw.split_once('|').map_or(raw, |(outcome, _)| outcome);
+    audit_outcome_from_str(outcome)
 }
 
 fn audit_from_row(row: &SqliteRow) -> Result<AuditRecord, PersistenceError> {
-    let (outcome, state) = decode_status(&row.text("status")?)?;
     Ok(AuditRecord {
         id: AuditId(row.int("id")?),
         session_id: row
@@ -74,12 +58,12 @@ fn audit_from_row(row: &SqliteRow) -> Result<AuditRecord, PersistenceError> {
             .map(|raw| parse_id::<ConnectionId>(raw, "连接"))
             .transpose()?,
         kind: audit_kind_from_str(&row.text("kind")?)?,
-        outcome,
+        outcome: decode_outcome(&row.text("outcome")?)?,
         command: row.opt_text("command")?,
         working_dir: row.opt_text("working_dir")?,
         started_at: UnixMillis(row.int("started_at")?),
         duration_ms: row.opt_int("duration_ms")?.map(narrow::<u64>).transpose()?,
-        state,
+        state: execution_state_from_str(&row.text("status")?)?,
         exit_code: row.opt_int("exit_code")?.map(narrow::<i32>).transpose()?,
         stdout_excerpt: row.opt_text("stdout_excerpt")?,
         stderr_excerpt: row.opt_text("stderr_excerpt")?,
@@ -111,9 +95,8 @@ fn push_audit_filters(builder: &mut QueryBuilder<Sqlite>, query: &AuditQuery) {
             .push_bind(audit_kind_to_str(kind));
     }
     if let Some(outcome) = query.outcome {
-        // `status` 存的是「outcome|state」，取分隔符前的部分做精确匹配。
         builder
-            .push(" AND substr(status, 1, instr(status, '|') - 1) = ")
+            .push(" AND outcome = ")
             .push_bind(audit_outcome_to_str(outcome));
     }
     if let Some(from) = query.from {
@@ -129,20 +112,21 @@ impl AuditRepo for SqliteAuditRepo {
     async fn append(&self, entry: NewAuditEntry) -> Result<AuditId, PersistenceError> {
         let done = sqlx::query(
             "INSERT INTO audit_events \
-             (session_id, token_id, connection_id, kind, command, working_dir, \
+             (session_id, token_id, connection_id, kind, outcome, command, working_dir, \
               started_at, duration_ms, status, exit_code, stdout_excerpt, stderr_excerpt, \
               error, redacted) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(entry.session_id.map(|id| id.to_string()))
         .bind(entry.token_id.map(|id| id.to_string()))
         .bind(entry.connection_id.map(|id| id.to_string()))
         .bind(audit_kind_to_str(entry.kind))
+        .bind(audit_outcome_to_str(entry.outcome))
         .bind(entry.command)
         .bind(entry.working_dir)
         .bind(entry.started_at.0)
         .bind(entry.duration_ms.map(narrow_bind_u64))
-        .bind(encode_status(entry.outcome, entry.state))
+        .bind(execution_state_to_str(entry.state))
         .bind(entry.exit_code)
         .bind(entry.stdout_excerpt)
         .bind(entry.stderr_excerpt)
@@ -188,7 +172,7 @@ impl AuditRepo for SqliteAuditRepo {
 
     async fn get(&self, id: AuditId) -> Result<Option<AuditRecord>, PersistenceError> {
         let row = sqlx::query(
-            "SELECT id, session_id, token_id, connection_id, kind, command, \
+            "SELECT id, session_id, token_id, connection_id, kind, outcome, command, \
              working_dir, started_at, duration_ms, status, exit_code, stdout_excerpt, \
              stderr_excerpt, error, redacted FROM audit_events WHERE id = ?",
         )

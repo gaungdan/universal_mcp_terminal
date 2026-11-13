@@ -5,8 +5,8 @@
 use std::path::{Path, PathBuf};
 
 use umt_core::{
-    AuditKind, AuditOutcome, AuditQuery, Connection, ConnectionId, ExecutionState, PageRequest,
-    SessionId, SessionInfo, SessionState, Token, TokenId, TokenStatus, UnixMillis,
+    AuditId, AuditKind, AuditOutcome, AuditQuery, Connection, ConnectionId, ExecutionState,
+    PageRequest, SessionId, SessionInfo, SessionState, Token, TokenId, TokenStatus, UnixMillis,
 };
 
 use super::SqliteRepos;
@@ -777,6 +777,118 @@ async fn audit_filters_and_pagination() {
     assert_eq!(page.items[0].started_at, UnixMillis(2_000));
 
     drop(repos);
+    cleanup(&path);
+}
+
+#[tokio::test]
+async fn migration_splits_legacy_status_encoding() {
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+
+    let path = db_path();
+    // 先用 0001 建表并写入旧编码数据，再单独执行 0002，模拟已有数据库升级。
+    let options = SqliteConnectOptions::new()
+        .filename(&path)
+        .create_if_missing(true)
+        .foreign_keys(true);
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(options)
+        .await
+        .expect("打开旧版数据库");
+    sqlx::raw_sql(include_str!("../../../migrations/0001_init.sql"))
+        .execute(&pool)
+        .await
+        .expect("执行 v1 建表");
+    sqlx::query(
+        "INSERT INTO audit_events (kind, started_at, status) \
+         VALUES ('command_executed', 1000, 'allowed|succeeded')",
+    )
+    .execute(&pool)
+    .await
+    .expect("写入旧编码审计");
+    sqlx::raw_sql(include_str!("../../../migrations/0002_audit_outcome.sql"))
+        .execute(&pool)
+        .await
+        .expect("执行 v2 迁移");
+
+    let (outcome, status): (String, String) =
+        sqlx::query_as("SELECT outcome, status FROM audit_events WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .expect("读取拆分后的列");
+    assert_eq!(outcome, "allowed", "分隔符前应回填为 outcome");
+    assert_eq!(status, "succeeded", "分隔符后应保留为 status");
+
+    let repos = SqliteRepos::new(pool.clone());
+    let record = repos
+        .audit
+        .get(AuditId(1))
+        .await
+        .expect("读取审计")
+        .expect("审计应存在");
+    assert_eq!(record.outcome, AuditOutcome::Allowed);
+    assert_eq!(record.state, ExecutionState::Succeeded);
+
+    pool.close().await;
+    cleanup(&path);
+}
+
+#[tokio::test]
+async fn audit_outcome_filter_matches_dedicated_column() {
+    let path = db_path();
+    let db = Database::connect(&path).await.expect("打开数据库应成功");
+    let repos = SqliteRepos::new(db.pool().clone());
+
+    let token_id = TokenId::new();
+    let connection_id = ConnectionId::new();
+    repos
+        .audit
+        .append(sample_audit(
+            AuditKind::CommandExecuted,
+            token_id,
+            connection_id,
+            1_000,
+        ))
+        .await
+        .expect("写入 allowed");
+    let denied = repos
+        .audit
+        .append(NewAuditEntry {
+            outcome: AuditOutcome::Denied,
+            kind: AuditKind::PermissionDenied,
+            command: Some("open_session connection_id=abc".to_string()),
+            state: ExecutionState::Failed,
+            exit_code: None,
+            duration_ms: None,
+            error: Some("访问被拒绝".to_string()),
+            ..sample_audit(AuditKind::PermissionDenied, token_id, connection_id, 2_000)
+        })
+        .await
+        .expect("写入 denied");
+
+    let page = repos
+        .audit
+        .query(&AuditQuery {
+            outcome: Some(AuditOutcome::Denied),
+            ..AuditQuery::default()
+        })
+        .await
+        .expect("按 outcome 查询");
+    assert_eq!(page.total, 1, "outcome 过滤必须命中且只命中 denied");
+    assert_eq!(page.items[0].id, denied);
+    assert_eq!(page.items[0].kind, AuditKind::PermissionDenied);
+    assert_eq!(page.items[0].state, ExecutionState::Failed);
+
+    // status 列只存执行状态，不再包含联合编码。
+    let raw: String = sqlx::query_scalar("SELECT status FROM audit_events WHERE id = ?")
+        .bind(denied.0)
+        .fetch_one(db.pool())
+        .await
+        .expect("读取 status");
+    assert_eq!(raw, "failed");
+
+    drop(repos);
+    drop(db);
     cleanup(&path);
 }
 

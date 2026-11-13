@@ -70,4 +70,24 @@ impl HostKeyRepo for SqliteHostKeyRepo {
         .map_err(backend)?;
         Ok(())
     }
+
+    async fn delete(&self, endpoint: &str) -> Result<bool, PersistenceError> {
+        let result = sqlx::query("DELETE FROM ssh_host_keys WHERE endpoint = ?")
+            .bind(endpoint)
+            .execute(&self.pool)
+            .await
+            .map_err(backend)?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    async fn list(&self) -> Result<Vec<HostKeyRecord>, PersistenceError> {
+        let rows = sqlx::query(
+            "SELECT endpoint, host, port, algorithm, fingerprint, trusted_at, trusted_by \
+             FROM ssh_host_keys ORDER BY trusted_at DESC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(backend)?;
+        rows.iter().map(host_key_from_row).collect()
+    }
 }

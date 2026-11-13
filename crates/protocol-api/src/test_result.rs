@@ -11,6 +11,17 @@ pub struct ConnectionTestResult {
     pub steps: Vec<TestStep>,
     /// 失败时的排查建议。
     pub suggestion: Option<String>,
+    /// 握手阶段观察到的 Host Key。存在时前端可以引导用户确认并固定指纹。
+    #[serde(default)]
+    pub host_key: Option<HostKeyInfo>,
+}
+
+/// 握手时观察到的服务端 Host Key。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostKeyInfo {
+    pub fingerprint: String,
+    #[serde(default)]
+    pub algorithm: Option<String>,
 }
 
 impl ConnectionTestResult {
@@ -21,6 +32,7 @@ impl ConnectionTestResult {
             latency_ms: Some(latency_ms),
             steps,
             suggestion: None,
+            host_key: None,
         }
     }
 
@@ -35,7 +47,14 @@ impl ConnectionTestResult {
             latency_ms: None,
             steps,
             suggestion,
+            host_key: None,
         }
+    }
+
+    /// 记录观察到的 Host Key，供 UI 引导用户信任。
+    pub fn with_host_key(mut self, host_key: Option<HostKeyInfo>) -> Self {
+        self.host_key = host_key;
+        self
     }
 }
 

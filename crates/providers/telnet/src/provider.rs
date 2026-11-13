@@ -254,6 +254,8 @@ impl ProtocolProvider for TelnetProvider {
                     latency_ms: Some(elapsed_ms(started)),
                     steps,
                     suggestion: Some("Telnet 无加密，仅建议在可信网络使用".into()),
+                    // Telnet 没有 Host Key 概念。
+                    host_key: None,
                 })
             }
             Err(err) => {

@@ -103,3 +103,28 @@
 .settings__status-item code {
   font-size: 12px;
 }
+
+.settings__table {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings__table-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content max-content;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  font-size: 13px;
+  background-color: var(--color-panel-alt, #f7faf7);
+  border: 1px solid var(--color-border, #d8e2d8);
+  border-radius: var(--radius);
+}
+
+@media (max-width: 900px) {
+  .settings__table-row {
+    grid-template-columns: 1fr;
+    justify-items: start;
+  }
+}

@@ -303,3 +303,61 @@ async fn secret_cipher_roundtrip_and_nonce_validation() {
     drop(state);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test]
+async fn host_key_trust_list_and_revoke_roundtrip() {
+    let dir = temp_dir();
+    let state = AppState::initialize_with_keystore(&dir, new_keystore())
+        .await
+        .expect("初始化应用状态失败");
+    let created = services::connections::create(&state, ssh_connection_input("hostkey"))
+        .await
+        .expect("创建连接失败");
+
+    let trusted = services::host_keys::trust(
+        &state,
+        umt_app::ipc::dto::TrustHostKeyInput {
+            connection_id: created.id.clone(),
+            fingerprint: "SHA256:abcdef0123456789".into(),
+            algorithm: Some("ssh-ed25519".into()),
+        },
+    )
+    .await
+    .expect("信任 Host Key 失败");
+    assert_eq!(trusted.endpoint, "127.0.0.1:22");
+    assert_eq!(trusted.fingerprint, "SHA256:abcdef0123456789");
+    assert_eq!(
+        services::host_keys::list(&state)
+            .await
+            .expect("列表失败")
+            .len(),
+        1
+    );
+
+    // 非法指纹必须被拒绝
+    let invalid = services::host_keys::trust(
+        &state,
+        umt_app::ipc::dto::TrustHostKeyInput {
+            connection_id: created.id.clone(),
+            fingerprint: "not-a-fingerprint".into(),
+            algorithm: None,
+        },
+    )
+    .await;
+    assert!(invalid.is_err(), "非法指纹必须报错");
+
+    assert!(
+        services::host_keys::delete(&state, &trusted.endpoint)
+            .await
+            .expect("撤销失败")
+    );
+    assert!(
+        services::host_keys::list(&state)
+            .await
+            .expect("列表失败")
+            .is_empty()
+    );
+
+    drop(state);
+    let _ = std::fs::remove_dir_all(&dir);
+}

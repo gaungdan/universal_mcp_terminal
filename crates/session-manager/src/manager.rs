@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use dashmap::DashMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::sync::Mutex;
 use umt_access_control::SessionRevoker;
@@ -14,6 +14,8 @@ use umt_persistence::{NewAuditEntry, SessionFilter, SessionRepo};
 use umt_protocol_api::{
     ConnectOptions, ExecRequest, ExecResult, OutputChunk, ProtocolProvider, TerminalSession,
 };
+
+use crate::policy::{CommandPolicy, PolicyDecision};
 
 /// 建立会话的入参。连接与配置必须已经过 AccessControl 授权。
 pub struct OpenSessionRequest {
@@ -56,7 +58,8 @@ pub struct SessionManager {
     repo: Arc<dyn SessionRepo>,
     audit: Arc<AuditService>,
     active: DashMap<SessionId, Arc<ActiveSession>>,
-    limits: SessionLimits,
+    policy: RwLock<CommandPolicy>,
+    limits: RwLock<SessionLimits>,
 }
 
 impl SessionManager {
@@ -69,8 +72,39 @@ impl SessionManager {
             repo,
             audit,
             active: DashMap::new(),
-            limits,
+            policy: RwLock::new(CommandPolicy::default()),
+            limits: RwLock::new(limits),
         }
+    }
+
+    /// 运行期热更新执行策略；下一次 `exec` 立即生效。
+    pub fn set_policy(&self, policy: CommandPolicy) {
+        *self
+            .policy
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = policy;
+    }
+
+    /// 运行期热更新会话限制；`open` 与 `reap_idle` 立即读取最新值。
+    pub fn set_limits(&self, limits: SessionLimits) {
+        *self
+            .limits
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = limits;
+    }
+
+    fn policy_snapshot(&self) -> CommandPolicy {
+        self.policy
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    fn limits_snapshot(&self) -> SessionLimits {
+        *self
+            .limits
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     /// 建立会话。Provider 必须由调用方从注册中心取得。
@@ -79,10 +113,11 @@ impl SessionManager {
         provider: Arc<dyn ProtocolProvider>,
         request: OpenSessionRequest,
     ) -> Result<SessionInfo, UmtError> {
-        if self.active.len() >= self.limits.max_sessions {
+        let limits = self.limits_snapshot();
+        if self.active.len() >= limits.max_sessions {
             return Err(UmtError::Conflict(format!(
                 "活动会话数已达上限 {}",
-                self.limits.max_sessions
+                limits.max_sessions
             )));
         }
         if !request.connection.enabled {
@@ -218,6 +253,25 @@ impl SessionManager {
         let session = self.owned(session_id, token_id)?;
         let started = UnixMillis::now();
         let command = request.command.clone();
+
+        match self.policy_snapshot().evaluate(&command) {
+            PolicyDecision::Allow => {}
+            PolicyDecision::Deny { reason } => {
+                self.record_denied(&session, session_id, token_id, &command, &reason)
+                    .await?;
+                return Err(UmtError::AccessDenied(reason));
+            }
+            PolicyDecision::NeedsConfirmation { risk: _, reason } => {
+                // 当前 MCP 通道无法完成桌面端确认，绝不伪造执行成功。
+                let message = format!(
+                    "高风险操作需要桌面端确认：{command}（当前 MCP 通道不提供确认，请在桌面端执行或改用 FullAccess）"
+                );
+                self.record_denied(&session, session_id, token_id, &command, &reason)
+                    .await?;
+                return Err(UmtError::AccessDenied(message));
+            }
+        }
+
         let mut guard = session.session.lock().await;
         let result = guard.exec(request).await;
         drop(guard);
@@ -300,10 +354,11 @@ impl SessionManager {
 
     /// 关闭超时未活动的会话，返回关闭数量。由 App 层定时调用。
     pub async fn reap_idle(&self) -> u64 {
-        if self.limits.idle_timeout.is_zero() {
+        let limits = self.limits_snapshot();
+        if limits.idle_timeout.is_zero() {
             return 0;
         }
-        let deadline = UnixMillis::now().0 - self.limits.idle_timeout.as_millis() as i64;
+        let deadline = UnixMillis::now().0 - limits.idle_timeout.as_millis() as i64;
         let stale: Vec<SessionId> = self
             .active
             .iter()
@@ -378,6 +433,37 @@ impl SessionManager {
             error: None,
             redacted: false,
         }
+    }
+
+    /// 记录策略拒绝：命令被拦截，未实际发送到 Provider。
+    async fn record_denied(
+        &self,
+        session: &ActiveSession,
+        session_id: SessionId,
+        token_id: TokenId,
+        command: &str,
+        reason: &str,
+    ) -> Result<(), UmtError> {
+        self.audit
+            .record(NewAuditEntry {
+                session_id: Some(session_id),
+                token_id: Some(token_id),
+                connection_id: Some(session.info.connection_id),
+                kind: AuditKind::PermissionDenied,
+                outcome: AuditOutcome::Denied,
+                command: Some(command.to_string()),
+                working_dir: None,
+                started_at: UnixMillis::now(),
+                duration_ms: None,
+                state: ExecutionState::Failed,
+                exit_code: None,
+                stdout_excerpt: None,
+                stderr_excerpt: None,
+                error: Some(reason.to_string()),
+                redacted: false,
+            })
+            .await?;
+        Ok(())
     }
 
     async fn close_inner(&self, session_id: SessionId, reason: &str) -> Result<bool, UmtError> {
@@ -528,8 +614,9 @@ impl TerminalSession for ClosedSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::policy::ExecutionMode;
     use std::sync::Arc;
-    use umt_core::{Connection, TokenId};
+    use umt_core::{AuditQuery, Connection, TokenId};
     use umt_persistence::{AuditRepo, ConnectionRepo, InMemoryRepos};
     use umt_protocol_api::{MockProvider, ProtocolProvider, SecretValues};
 
@@ -612,10 +699,10 @@ mod tests {
 
         let result = f
             .manager
-            .exec(info.id, f.token_a, ExecRequest::new("uname"))
+            .exec(info.id, f.token_a, ExecRequest::new("uname -a"))
             .await
             .expect("执行失败");
-        assert_eq!(result.stdout, "mock:uname");
+        assert_eq!(result.stdout, "mock:uname -a");
 
         assert!(
             f.manager
@@ -730,5 +817,81 @@ mod tests {
             .expect("打开会话失败");
         assert_eq!(info.protocol_id, "mock");
         assert!(f.repos.audit.count().await.expect("统计审计失败") >= 1);
+    }
+
+    #[tokio::test]
+    async fn default_restricted_policy_denies_high_risk_command() {
+        let f = fixture(SessionLimits::default()).await;
+        let info = f
+            .manager
+            .open(f.provider.clone(), request(&f, f.token_a))
+            .await
+            .expect("打开会话失败");
+
+        let error = f
+            .manager
+            .exec(info.id, f.token_a, ExecRequest::new("rm -rf /"))
+            .await
+            .expect_err("默认 Restricted 必须拒绝 rm -rf /");
+        assert_eq!(error.code(), "access_denied");
+        assert!(error.to_string().contains("受限模式"), "{error}");
+
+        let page = f
+            .repos
+            .audit
+            .query(&AuditQuery {
+                kind: Some(AuditKind::PermissionDenied),
+                outcome: Some(AuditOutcome::Denied),
+                ..Default::default()
+            })
+            .await
+            .expect("查询审计失败");
+        assert_eq!(page.total, 1);
+        assert_eq!(page.items[0].command.as_deref(), Some("rm -rf /"));
+        assert_eq!(page.items[0].state, ExecutionState::Failed);
+    }
+
+    #[tokio::test]
+    async fn policy_and_limits_hot_update_take_effect() {
+        let f = fixture(SessionLimits {
+            max_sessions: 8,
+            idle_timeout: Duration::from_secs(3600),
+        })
+        .await;
+        let info = f
+            .manager
+            .open(f.provider.clone(), request(&f, f.token_a))
+            .await
+            .expect("打开会话失败");
+
+        assert!(
+            f.manager
+                .exec(info.id, f.token_a, ExecRequest::new("rm -rf /"))
+                .await
+                .is_err(),
+            "默认 Restricted 必须拒绝"
+        );
+
+        // 热更新策略后无需重建 SessionManager 即可执行。
+        f.manager.set_policy(CommandPolicy {
+            mode: ExecutionMode::FullAccess,
+            allow_prefixes: Vec::new(),
+            require_confirmation_for_high_risk: false,
+        });
+        let result = f
+            .manager
+            .exec(info.id, f.token_a, ExecRequest::new("rm -rf /"))
+            .await
+            .expect("FullAccess 且无需确认时应放行");
+        assert_eq!(result.stdout, "mock:rm -rf /");
+
+        // 长超时下不回收；热更新为极短超时后立即回收。
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        assert_eq!(f.manager.reap_idle().await, 0);
+        f.manager.set_limits(SessionLimits {
+            max_sessions: 8,
+            idle_timeout: Duration::from_millis(1),
+        });
+        assert_eq!(f.manager.reap_idle().await, 1);
     }
 }

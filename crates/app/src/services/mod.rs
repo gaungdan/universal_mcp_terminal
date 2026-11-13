@@ -4,6 +4,7 @@
 
 pub mod audit;
 pub mod connections;
+pub mod host_keys;
 pub mod mcp;
 pub mod protocols;
 pub mod secrets;
