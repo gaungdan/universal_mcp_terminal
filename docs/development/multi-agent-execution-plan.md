@@ -317,7 +317,7 @@ Wave 3 (并行): T20 | T21
 | T20 | ✅ | 真实 HTTP 端到端 + 权限矩阵；发现并修复 HTTP 层未鉴权缺口 |
 | T21 | ✅ | 架构、MCP 接入、协议开发文档 + 测试报告 |
 
-**当前门禁**：`cargo fmt --check`、`cargo clippy --workspace --all-targets -D warnings`、`cargo test --workspace`（180 passed / 1 ignored）、前端 typecheck / lint / test（66）/ build 全通过。
+**当前门禁**：`cargo fmt --check`、`cargo clippy --workspace --all-targets -D warnings`、`cargo test --workspace`（182 passed / 1 ignored）、前端 typecheck / lint / test（66）/ build 全通过；`tauri build --debug --no-bundle` 已验证可产出可执行文件。
 
 ### 收口补强（2026-11-13）
 
@@ -328,7 +328,12 @@ Wave 3 (并行): T20 | T21
 | 权限拒绝审计 | ✅ | 工具层越权/能力不支持 + HTTP 层鉴权失败都会写 `permission_denied` |
 | `audit_events.outcome` | ✅ | 迁移 0002 拆列并回填旧编码数据 |
 | 设置热更新 | ✅ | 执行模式、Session 超时修改后即时生效 |
+| 官方客户端兼容 | ✅ | `rmcp` 官方客户端完成握手、9 工具、open/close session |
+| 真实设备联调 | ✅（SSH/Telnet 链路） | SSH 已对 WSL sshd 用密钥认证实测通过；Telnet 用进程级设备模拟器验证真实 TCP/IAC/登录/分页；物理设备仍需现场复跑 |
+| CI | ✅ | `.github/workflows/ci.yml`：fmt / clippy / test / 前端四门禁（Windows MSVC runner） |
+| 桌面构建 | ✅ | `tauri build --debug --no-bundle` 成功产出 `umt-desktop.exe` |
 
-**仍未覆盖**：SSH/Telnet 真实环境联调（SSH 用例需环境变量）、MCP 官方客户端兼容性验证、安装包与 CI。
+**仍未覆盖**：真实物理网络设备（交换机/路由器）现场联调、安装包（NSIS/MSI）打包与签名。
+详细步骤见 [real-device-integration.md](real-device-integration.md)。
 
 **已知技术债**：`audit_events` 冻结表结构没有独立 `outcome` 列，T6 暂时把 `outcome|state` 编码进 `status`，读写已封装在 `src/repo/sqlite/audit.rs`。后续用新迁移补列并回填，不要在旧迁移上直接改。

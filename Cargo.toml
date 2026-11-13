@@ -82,7 +82,14 @@ keyring = { version = "4.2.0", features = ["v1"] }
 russh = { version = "0.65.1", default-features = false, features = ["ring", "rsa", "flate2"] }
 
 # ---- MCP ----
-rmcp = { version = "3.9.0", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
+rmcp = { version = "3.9.0", features = [
+    "server",
+    "macros",
+    "schemars",
+    "transport-streamable-http-server",
+    "client",
+    "transport-streamable-http-client-reqwest",
+] }
 axum = "0.8.9"
 tower = "0.5.3"
 http = "1.5.0"

@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: Build & Test (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    env:
+      # rust-toolchain.toml 固定了 stable-x86_64-pc-windows-gnu（本机没有 MSVC），
+      # 但 GitHub 的 windows-latest runner 自带 MSVC 而不保证有 MinGW 链接器，
+      # 因此用环境变量覆盖 toolchain 文件，改用 MSVC 构建。
+      RUSTUP_TOOLCHAIN: stable-x86_64-pc-windows-msvc
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: "0"
+      RUST_BACKTRACE: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Install Rust (MSVC)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable-x86_64-pc-windows-msvc
+          components: rustfmt, clippy
+
+      - name: Cache Rust workspace
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "."
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets -j 2 -- -D warnings
+
+      - name: Run Rust tests (excluding WSL provider)
+        run: cargo test --workspace --exclude umt-provider-wsl -j 2
+
+      # umt-provider-wsl 的用例依赖本机真实 WSL 发行版（cfg(windows) 下直接调用 wsl.exe），
+      # GitHub 的 windows runner 没有 WSL，用例会跳过或失败；单独运行且不阻塞流水线。
+      - name: Run WSL provider tests (requires real WSL; may skip/fail on runner)
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          Write-Host "::warning::umt-provider-wsl 用例依赖真实 WSL，GitHub windows runner 通常无 WSL，失败或跳过均属预期。"
+          cargo test -p umt-provider-wsl -j 2
+
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: apps/desktop
+        run: npm run typecheck
+
+      - name: Lint frontend
+        working-directory: apps/desktop
+        run: npm run lint
+
+      - name: Test frontend
+        working-directory: apps/desktop
+        run: npm run test
+
+      - name: Build frontend
+        working-directory: apps/desktop
+        run: npm run build
+
+      - name: Upload frontend build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-dist
+          path: apps/desktop/dist
+          retention-days: 7
+          if-no-files-found: error

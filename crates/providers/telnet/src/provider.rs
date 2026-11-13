@@ -220,8 +220,13 @@ impl ProtocolProvider for TelnetProvider {
         config: &ConnectionConfig,
     ) -> Result<ConnectionTestResult, ProviderError> {
         self.validate_config(config).await?;
-        // 测试连接接口不携带机密值，只能验证无需密码的登录或直接提示符。
-        let parsed = TelnetConfig::from_config(config, &SecretValues::default())?;
+        // 测试连接接口本身没有 ConnectOptions；App 层会把解密后的机密值合并进 config，
+        // 因此这里从 config 读取 password（仅用于测试，不作为生产凭据来源）。
+        let mut secrets = std::collections::BTreeMap::new();
+        if let Some(password) = config.get_str("password") {
+            secrets.insert("password".to_string(), password.to_string());
+        }
+        let parsed = TelnetConfig::from_config(config, &SecretValues::new(secrets))?;
 
         let started = Instant::now();
         let stream = match connect_tcp(&parsed).await {

@@ -38,20 +38,24 @@
 | `umt-access-control` | 6 | 0 | Token 生命周期、授权矩阵、撤销联动 |
 | `umt-session-manager` | 14 | 0 | 状态机、跨 Token 隔离、空闲回收、执行策略（6 个策略用例） |
 | `umt-provider-ssh`（单元） | 19 | 0 | Schema、能力、配置校验 |
-| `umt-provider-ssh`（`tests/real_connection.rs`） | 0 | 1 | 真实 SSH 连接测试，需 `UMT_TEST_SSH_*` 环境变量 |
+| `umt-provider-ssh`（`tests/real_connection.rs`） | 0 | 1 | 真实 SSH 连接测试（默认忽略，需 `UMT_TEST_SSH_*`）；已用 WSL sshd + 密钥认证实测通过，见 `real-device-integration.md` |
 | `umt-provider-telnet`（单元） | 4 | 0 | 能力、Schema、配置 |
 | `umt-provider-telnet`（`tests/telnet_provider.rs`） | 12 | 0 | 假设备登录、exec、分页、超时、resize 拒绝 |
+| `umt-provider-telnet`（`tests/real_telnet.rs`） | 0 | 1 | 真实 TCP 链路测试（需启动 `scripts/telnet_device_sim.py`）；已实测通过登录、exec 与自动分页 |
 | `umt-provider-wsl` | 29 | 0 | 发行版枚举、UTF-16LE 解码、exec、超时、进程树清理、真实 WSL |
 | `umt-mcp-server`（单元） | 15 | 0 | Bearer 解析、越权审计、能力、临时会话、密钥版本 |
 | `umt-mcp-server`（`tests/http_e2e.rs`） | 8 | 0 | 真实 HTTP + Streamable HTTP；含未认证 `initialize` / `tools/list` 被 401 拒绝 |
+| `umt-mcp-server`（`tests/official_client.rs`） | 2 | 0 | 官方 rmcp 客户端握手、9 工具、open/close session、错误 Token 拒绝 |
 | `umt-app`（`tests/services.rs`） | 4 | 0 | 重启恢复、密文往返、未授权拒绝、Host Key 信任往返 |
 | `umt-app` / `umt-desktop` / doc-tests | 0 | 0 | 无独立单测 |
-| **合计** | **180** | **1** | 0 failed |
+| **合计** | **182** | **2** | 0 failed |
 
-忽略的 1 个用例：
+忽略的 2 个用例：
 
 1. `umt-provider-ssh::real_ssh_test_connect_exec_and_interactive_shell`
-   —— 需要 `UMT_TEST_SSH_HOST/PORT/USER/PASSWORD`，通过 `cargo test -p umt-provider-ssh -- --ignored` 运行。
+   —— 需要 `UMT_TEST_SSH_HOST/PORT/USER` 与 `PASSWORD` 或 `PRIVATE_KEY`；已用 WSL sshd 实测通过。
+2. `umt-provider-telnet::real_telnet_login_exec_and_paging`
+   —— 需要先启动 `scripts/telnet_device_sim.py`；已实测通过登录、exec 与分页。
 
 ### 2.2 前端（Vitest）
 
@@ -109,7 +113,7 @@ src/pages/connections/ConnectionsPage.test 10
 
 | # | 验收项 | 结论 | 依据/原因 |
 |---|---|---|---|
-| 1 | 标准 MCP 客户端能够连接 | **部分覆盖** | e2e 使用真实 HTTP + Streamable HTTP + JSON-RPC/SSE 跑通 9 个工具；未使用官方 SDK 客户端（如 `mcp-inspector`）做兼容性验证 |
+| 1 | 标准 MCP 客户端能够连接 | **已覆盖** | e2e 真实 HTTP + `tests/official_client.rs` 使用 rmcp 官方客户端完成 initialize / list_tools / open_session / close_session；客户端默认 `2026-07-28`，服务端自动降级 `2025-11-25` 握手成功 |
 | 2 | Bearer Token 能够正确认证 | **已覆盖** | e2e 全流程使用真实 Bearer；`parse_bearer` 单测覆盖大小写与畸形头 |
 | 3 | 未认证请求被拒绝 | **已覆盖** | `/mcp` 前置 Bearer 中间件返回 401；`tools/call` 另有工具级二次校验 |
 | 4 | 过期 Token 被拒绝 | **已覆盖** | `disabled_and_expired_tokens_are_rejected` |
