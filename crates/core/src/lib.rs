@@ -29,4 +29,4 @@ pub use ids::{AuditId, ConnectionId, SessionId, TokenId};
 pub use pagination::{Page, PageRequest};
 pub use session::{ExecutionState, SessionInfo, SessionState};
 pub use time::UnixMillis;
-pub use token::{Token, TokenStatus};
+pub use token::{Token, TokenPermission, TokenStatus};

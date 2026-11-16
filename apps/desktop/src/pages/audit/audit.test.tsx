@@ -165,7 +165,6 @@ describe("AuditPage 列表与详情", () => {
     expect(within(table).getByText("2026-11-01 09:30:00")).toBeInTheDocument();
     expect(within(table).getByText("命令执行")).toBeInTheDocument();
     expect(within(table).getByText("允许")).toBeInTheDocument();
-    expect(within(table).getByText("成功")).toBeInTheDocument();
     expect(within(table).getByText("tok-1")).toBeInTheDocument();
     expect(within(table).getByText("conn-1")).toBeInTheDocument();
     expect(within(table).getByText("sess-1")).toBeInTheDocument();
@@ -193,8 +192,9 @@ describe("AuditPage 列表与详情", () => {
 
     fireEvent.click(await screen.findByText("cat /var/log/app.log"));
 
-    const detail = await screen.findByRole("complementary", { name: "审计详情" });
+    const detail = await screen.findByRole("region", { name: "审计详情" });
     expect(within(detail).getByText("已脱敏")).toBeInTheDocument();
+    expect(within(detail).getByText("成功")).toBeInTheDocument();
     expect(within(detail).getByText("cat /var/log/app.log")).toBeInTheDocument();
     expect(within(detail).getByText("/srv/app")).toBeInTheDocument();
     expect(within(detail).getByText("2.50 s")).toBeInTheDocument();
@@ -257,6 +257,30 @@ describe("AuditPage 会话历史", () => {
         connectionId: "conn-h",
       });
     });
+  });
+
+  it("点击会话行后在下方展示会话详情", async () => {
+    api.listSessionHistory.mockResolvedValue({
+      items: [
+        makeSession({
+          id: "sess-history-9",
+          clientInfo: "Claude Code",
+          rows: 40,
+          cols: 120,
+          closeReason: "服务端超时",
+        }),
+      ],
+      total: 1,
+    });
+    render(<AuditPage />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: /会话历史/ }));
+    fireEvent.click(await screen.findByText("服务端超时"));
+
+    const detail = await screen.findByRole("region", { name: "会话详情" });
+    expect(within(detail).getByText("Claude Code")).toBeInTheDocument();
+    expect(within(detail).getByText("40 × 120")).toBeInTheDocument();
+    expect(within(detail).getByText("sess-history-9")).toBeInTheDocument();
   });
 });
 

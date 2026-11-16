@@ -8,18 +8,28 @@ use umt_access_control::SessionRevoker;
 use umt_audit::AuditService;
 use umt_core::{
     AuditKind, AuditOutcome, Connection, ConnectionConfig, ConnectionId, ExecutionState, Page,
-    PageRequest, SessionId, SessionInfo, SessionState, TokenContext, TokenId, UmtError, UnixMillis,
+    PageRequest, SessionId, SessionInfo, SessionState, TokenContext, TokenId, TokenPermission,
+    UmtError, UnixMillis,
 };
 use umt_persistence::{NewAuditEntry, SessionFilter, SessionRepo};
 use umt_protocol_api::{
-    ConnectOptions, ExecRequest, ExecResult, OutputChunk, ProtocolProvider, TerminalSession,
+    ConnectOptions, ExecRequest, ExecResult, FileChunk, FileReadRequest, OutputChunk,
+    ProtocolProvider, TerminalSession,
 };
 
-use crate::policy::{CommandPolicy, PolicyDecision};
+use crate::policy::{CommandGuard, PolicyDecision};
+
+/// 会话用途。交互式终端需要额外权限，临时命令会话不需要。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionPurpose {
+    Interactive,
+    Exec,
+}
 
 /// 建立会话的入参。连接与配置必须已经过 AccessControl 授权。
 pub struct OpenSessionRequest {
     pub context: TokenContext,
+    pub purpose: SessionPurpose,
     pub connection: Connection,
     pub config: ConnectionConfig,
     pub secrets: umt_protocol_api::SecretValues,
@@ -58,7 +68,6 @@ pub struct SessionManager {
     repo: Arc<dyn SessionRepo>,
     audit: Arc<AuditService>,
     active: DashMap<SessionId, Arc<ActiveSession>>,
-    policy: RwLock<CommandPolicy>,
     limits: RwLock<SessionLimits>,
 }
 
@@ -72,17 +81,8 @@ impl SessionManager {
             repo,
             audit,
             active: DashMap::new(),
-            policy: RwLock::new(CommandPolicy::default()),
             limits: RwLock::new(limits),
         }
-    }
-
-    /// 运行期热更新执行策略；下一次 `exec` 立即生效。
-    pub fn set_policy(&self, policy: CommandPolicy) {
-        *self
-            .policy
-            .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = policy;
     }
 
     /// 运行期热更新会话限制；`open` 与 `reap_idle` 立即读取最新值。
@@ -91,13 +91,6 @@ impl SessionManager {
             .limits
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = limits;
-    }
-
-    fn policy_snapshot(&self) -> CommandPolicy {
-        self.policy
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone()
     }
 
     fn limits_snapshot(&self) -> SessionLimits {
@@ -122,6 +115,18 @@ impl SessionManager {
         }
         if !request.connection.enabled {
             return Err(UmtError::AccessDenied("连接已禁用".into()));
+        }
+        if request.purpose == SessionPurpose::Interactive {
+            if request.context.permission != TokenPermission::WriteAccess {
+                return Err(UmtError::AccessDenied(
+                    "ReadOnly Token 不允许使用交互式终端".into(),
+                ));
+            }
+            if !request.context.allow_interactive {
+                return Err(UmtError::AccessDenied(
+                    "该 Token 未开启交互式终端权限".into(),
+                ));
+            }
         }
 
         let options = ConnectOptions {
@@ -169,6 +174,8 @@ impl SessionManager {
                 connection_id: Some(info.connection_id),
                 kind: AuditKind::SessionOpened,
                 outcome: AuditOutcome::Allowed,
+                tool_name: None,
+                permission: Some(request.context.permission),
                 command: None,
                 working_dir: request.working_dir,
                 started_at: now,
@@ -188,10 +195,15 @@ impl SessionManager {
     pub async fn write(
         &self,
         session_id: SessionId,
-        token_id: TokenId,
+        context: &TokenContext,
         data: &[u8],
     ) -> Result<(), UmtError> {
-        let session = self.owned(session_id, token_id)?;
+        if context.permission != TokenPermission::WriteAccess || !context.allow_interactive {
+            return Err(UmtError::AccessDenied(
+                "当前 Token 不允许向交互式终端发送输入".into(),
+            ));
+        }
+        let session = self.owned(session_id, context.token_id)?;
         let mut guard = session.session.lock().await;
         guard.write(data).await?;
         drop(guard);
@@ -202,6 +214,7 @@ impl SessionManager {
         self.audit
             .record(NewAuditEntry {
                 command: Some(input),
+                permission: Some(context.permission),
                 ..self.event(
                     &session,
                     AuditKind::InputSent,
@@ -247,28 +260,26 @@ impl SessionManager {
     pub async fn exec(
         &self,
         session_id: SessionId,
-        token_id: TokenId,
+        context: &TokenContext,
         request: ExecRequest,
     ) -> Result<ExecResult, UmtError> {
-        let session = self.owned(session_id, token_id)?;
+        let session = self.owned(session_id, context.token_id)?;
         let started = UnixMillis::now();
         let command = request.command.clone();
 
-        match self.policy_snapshot().evaluate(&command) {
+        match CommandGuard::evaluate(context.permission, &command) {
             PolicyDecision::Allow => {}
             PolicyDecision::Deny { reason } => {
-                self.record_denied(&session, session_id, token_id, &command, &reason)
-                    .await?;
+                self.record_denied(
+                    &session,
+                    session_id,
+                    context.token_id,
+                    context.permission,
+                    &command,
+                    &reason,
+                )
+                .await?;
                 return Err(UmtError::AccessDenied(reason));
-            }
-            PolicyDecision::NeedsConfirmation { risk: _, reason } => {
-                // 当前 MCP 通道无法完成桌面端确认，绝不伪造执行成功。
-                let message = format!(
-                    "高风险操作需要桌面端确认：{command}（当前 MCP 通道不提供确认，请在桌面端执行或改用 FullAccess）"
-                );
-                self.record_denied(&session, session_id, token_id, &command, &reason)
-                    .await?;
-                return Err(UmtError::AccessDenied(message));
             }
         }
 
@@ -284,13 +295,15 @@ impl SessionManager {
                 self.audit
                     .record(NewAuditEntry {
                         session_id: Some(session_id),
-                        token_id: Some(token_id),
+                        token_id: Some(context.token_id),
                         connection_id: Some(session.info.connection_id),
                         kind: AuditKind::CommandExecuted,
                         outcome: match result.state {
                             ExecutionState::Succeeded => AuditOutcome::Allowed,
                             _ => AuditOutcome::Failed,
                         },
+                        tool_name: None,
+                        permission: Some(context.permission),
                         command: Some(command),
                         working_dir: None,
                         started_at: started,
@@ -310,15 +323,88 @@ impl SessionManager {
                 self.audit
                     .record(NewAuditEntry {
                         session_id: Some(session_id),
-                        token_id: Some(token_id),
+                        token_id: Some(context.token_id),
                         connection_id: Some(session.info.connection_id),
                         kind: AuditKind::CommandExecuted,
                         outcome: AuditOutcome::Failed,
+                        tool_name: None,
+                        permission: Some(context.permission),
                         command: Some(command),
                         working_dir: None,
                         started_at: started,
                         duration_ms: Some(elapsed),
                         state: ExecutionState::Unknown,
+                        exit_code: None,
+                        stdout_excerpt: None,
+                        stderr_excerpt: None,
+                        error: Some(umt.to_string()),
+                        redacted: false,
+                    })
+                    .await?;
+                Err(umt)
+            }
+        }
+    }
+
+    /// 读取远程文件的一个分块。仅要求会话归属与协议 `FileRead` 能力。
+    pub async fn read_file(
+        &self,
+        session_id: SessionId,
+        context: &TokenContext,
+        request: FileReadRequest,
+    ) -> Result<FileChunk, UmtError> {
+        let session = self.owned(session_id, context.token_id)?;
+        let started = UnixMillis::now();
+        let path = request.path.clone();
+        let result = {
+            let mut guard = session.session.lock().await;
+            guard.read_file(request).await
+        };
+        self.touch(&session);
+        self.promote_to_running(&session).await;
+        let elapsed = (UnixMillis::now().0 - started.0).max(0) as u64;
+
+        match result {
+            Ok(chunk) => {
+                self.audit
+                    .record(NewAuditEntry {
+                        session_id: Some(session_id),
+                        token_id: Some(context.token_id),
+                        connection_id: Some(session.info.connection_id),
+                        kind: AuditKind::FileRead,
+                        outcome: AuditOutcome::Allowed,
+                        tool_name: None,
+                        permission: Some(context.permission),
+                        command: Some(path),
+                        working_dir: None,
+                        started_at: started,
+                        duration_ms: Some(elapsed),
+                        state: ExecutionState::Succeeded,
+                        exit_code: None,
+                        stdout_excerpt: None,
+                        stderr_excerpt: None,
+                        error: None,
+                        redacted: false,
+                    })
+                    .await?;
+                Ok(chunk)
+            }
+            Err(err) => {
+                let umt: UmtError = err.into();
+                self.audit
+                    .record(NewAuditEntry {
+                        session_id: Some(session_id),
+                        token_id: Some(context.token_id),
+                        connection_id: Some(session.info.connection_id),
+                        kind: AuditKind::FileRead,
+                        outcome: AuditOutcome::Failed,
+                        tool_name: None,
+                        permission: Some(context.permission),
+                        command: Some(path),
+                        working_dir: None,
+                        started_at: started,
+                        duration_ms: Some(elapsed),
+                        state: ExecutionState::Failed,
                         exit_code: None,
                         stdout_excerpt: None,
                         stderr_excerpt: None,
@@ -422,6 +508,8 @@ impl SessionManager {
             connection_id: Some(session.info.connection_id),
             kind,
             outcome: AuditOutcome::Allowed,
+            tool_name: None,
+            permission: None,
             command,
             working_dir: None,
             started_at: UnixMillis::now(),
@@ -441,6 +529,7 @@ impl SessionManager {
         session: &ActiveSession,
         session_id: SessionId,
         token_id: TokenId,
+        permission: TokenPermission,
         command: &str,
         reason: &str,
     ) -> Result<(), UmtError> {
@@ -451,6 +540,8 @@ impl SessionManager {
                 connection_id: Some(session.info.connection_id),
                 kind: AuditKind::PermissionDenied,
                 outcome: AuditOutcome::Denied,
+                tool_name: None,
+                permission: Some(permission),
                 command: Some(command.to_string()),
                 working_dir: None,
                 started_at: UnixMillis::now(),
@@ -508,6 +599,8 @@ impl SessionManager {
                 connection_id: Some(session.info.connection_id),
                 kind: AuditKind::SessionClosed,
                 outcome: AuditOutcome::Allowed,
+                tool_name: None,
+                permission: None,
                 command: None,
                 working_dir: None,
                 started_at: UnixMillis::now(),
@@ -614,7 +707,6 @@ impl TerminalSession for ClosedSession {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::policy::ExecutionMode;
     use std::sync::Arc;
     use umt_core::{AuditQuery, Connection, TokenId};
     use umt_persistence::{AuditRepo, ConnectionRepo, InMemoryRepos};
@@ -662,9 +754,32 @@ mod tests {
         }
     }
 
+    fn context(
+        token_id: TokenId,
+        permission: TokenPermission,
+        allow_interactive: bool,
+    ) -> TokenContext {
+        TokenContext::new(token_id, "test-token")
+            .with_permission(permission)
+            .with_interactive(allow_interactive)
+    }
+
     fn request(f: &Fixture, token_id: TokenId) -> OpenSessionRequest {
+        request_with(
+            f,
+            context(token_id, TokenPermission::WriteAccess, true),
+            SessionPurpose::Interactive,
+        )
+    }
+
+    fn request_with(
+        f: &Fixture,
+        context: TokenContext,
+        purpose: SessionPurpose,
+    ) -> OpenSessionRequest {
         OpenSessionRequest {
-            context: TokenContext::new(token_id, "test-token"),
+            context,
+            purpose,
             connection: f.connection.clone(),
             config: ConnectionConfig::new("mock", serde_json::json!({ "host": "local" })),
             secrets: SecretValues::default(),
@@ -679,6 +794,7 @@ mod tests {
     #[tokio::test]
     async fn open_write_read_exec_close() {
         let f = fixture(SessionLimits::default()).await;
+        let ctx = context(f.token_a, TokenPermission::WriteAccess, true);
         let info = f
             .manager
             .open(f.provider.clone(), request(&f, f.token_a))
@@ -687,7 +803,7 @@ mod tests {
         assert_eq!(info.state, SessionState::Connected);
 
         f.manager
-            .write(info.id, f.token_a, b"echo hi")
+            .write(info.id, &ctx, b"echo hi")
             .await
             .expect("写入失败");
         let chunk = f
@@ -699,7 +815,7 @@ mod tests {
 
         let result = f
             .manager
-            .exec(info.id, f.token_a, ExecRequest::new("uname -a"))
+            .exec(info.id, &ctx, ExecRequest::new("uname -a"))
             .await
             .expect("执行失败");
         assert_eq!(result.stdout, "mock:uname -a");
@@ -732,7 +848,8 @@ mod tests {
             .await
             .expect("打开会话失败");
 
-        assert!(f.manager.write(info.id, f.token_b, b"x").await.is_err());
+        let other = context(f.token_b, TokenPermission::WriteAccess, true);
+        assert!(f.manager.write(info.id, &other, b"x").await.is_err());
         assert!(f.manager.close(info.id, f.token_b, "steal").await.is_err());
     }
 
@@ -820,21 +937,55 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn default_restricted_policy_denies_high_risk_command() {
+    async fn read_only_cannot_open_interactive_session() {
         let f = fixture(SessionLimits::default()).await;
+        let ctx = context(f.token_a, TokenPermission::ReadOnly, true);
+        let error = f
+            .manager
+            .open(
+                f.provider.clone(),
+                request_with(&f, ctx, SessionPurpose::Interactive),
+            )
+            .await
+            .expect_err("ReadOnly 不允许交互式会话");
+        assert_eq!(error.code(), "access_denied");
+    }
+
+    #[tokio::test]
+    async fn write_access_requires_interactive_switch() {
+        let f = fixture(SessionLimits::default()).await;
+        let ctx = context(f.token_a, TokenPermission::WriteAccess, false);
+        let error = f
+            .manager
+            .open(
+                f.provider.clone(),
+                request_with(&f, ctx, SessionPurpose::Interactive),
+            )
+            .await
+            .expect_err("未开启交互式时不允许打开会话");
+        assert_eq!(error.code(), "access_denied");
+    }
+
+    #[tokio::test]
+    async fn read_only_policy_denies_destructive_command() {
+        let f = fixture(SessionLimits::default()).await;
+        let ctx = context(f.token_a, TokenPermission::ReadOnly, false);
         let info = f
             .manager
-            .open(f.provider.clone(), request(&f, f.token_a))
+            .open(
+                f.provider.clone(),
+                request_with(&f, ctx.clone(), SessionPurpose::Exec),
+            )
             .await
-            .expect("打开会话失败");
+            .expect("以 Exec 用途打开会话应成功");
 
         let error = f
             .manager
-            .exec(info.id, f.token_a, ExecRequest::new("rm -rf /"))
+            .exec(info.id, &ctx, ExecRequest::new("rm -rf /"))
             .await
-            .expect_err("默认 Restricted 必须拒绝 rm -rf /");
+            .expect_err("ReadOnly 必须拒绝 rm -rf /");
         assert_eq!(error.code(), "access_denied");
-        assert!(error.to_string().contains("受限模式"), "{error}");
+        assert!(error.to_string().contains("ReadOnly"), "{error}");
 
         let page = f
             .repos
@@ -852,38 +1003,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn policy_and_limits_hot_update_take_effect() {
+    async fn limits_hot_update_take_effect() {
         let f = fixture(SessionLimits {
             max_sessions: 8,
             idle_timeout: Duration::from_secs(3600),
         })
         .await;
-        let info = f
-            .manager
+        f.manager
             .open(f.provider.clone(), request(&f, f.token_a))
             .await
             .expect("打开会话失败");
-
-        assert!(
-            f.manager
-                .exec(info.id, f.token_a, ExecRequest::new("rm -rf /"))
-                .await
-                .is_err(),
-            "默认 Restricted 必须拒绝"
-        );
-
-        // 热更新策略后无需重建 SessionManager 即可执行。
-        f.manager.set_policy(CommandPolicy {
-            mode: ExecutionMode::FullAccess,
-            allow_prefixes: Vec::new(),
-            require_confirmation_for_high_risk: false,
-        });
-        let result = f
-            .manager
-            .exec(info.id, f.token_a, ExecRequest::new("rm -rf /"))
-            .await
-            .expect("FullAccess 且无需确认时应放行");
-        assert_eq!(result.stdout, "mock:rm -rf /");
 
         // 长超时下不回收；热更新为极短超时后立即回收。
         tokio::time::sleep(Duration::from_millis(5)).await;

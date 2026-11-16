@@ -36,6 +36,8 @@ function makeToken(overrides: Partial<TokenDto> = {}): TokenDto {
     description: null,
     prefix: "abc123",
     status: "active",
+    permission: "read_only",
+    allowInteractive: false,
     expiresAt: null,
     createdAt: 1_760_000_000_000,
     lastUsedAt: null,

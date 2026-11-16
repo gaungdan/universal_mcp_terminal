@@ -136,6 +136,7 @@ body {
   border: 1px solid transparent;
   border-radius: var(--radius);
   cursor: pointer;
+  white-space: nowrap;
   transition:
     background-color 0.15s ease,
     border-color 0.15s ease,
@@ -438,7 +439,10 @@ textarea.form-field__control {
 .dialog {
   width: 100%;
   max-width: 420px;
+  max-height: calc(100vh - 48px);
   padding: 22px 24px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background-color: var(--color-panel);
   border-radius: var(--radius);
   box-shadow: 0 18px 44px rgba(17, 34, 24, 0.24);
@@ -462,3 +466,20 @@ textarea.form-field__control {
   gap: 8px;
   margin-top: 20px;
 }
+
+/* 最小窗口（1100×720）下压缩外壳留白，避免内容被挤出可视区域 */
+@media (max-width: 1200px) {
+  .sidebar {
+    width: 200px;
+    padding: 20px 12px;
+  }
+
+  .content {
+    padding: 16px;
+  }
+
+  .page {
+    padding: 20px 22px;
+  }
+}
+

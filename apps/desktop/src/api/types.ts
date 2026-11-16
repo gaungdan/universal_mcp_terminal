@@ -180,12 +180,16 @@ export type TrustHostKeyInput = {
 
 export type TokenStatus = "active" | "disabled" | "revoked";
 
+export type TokenPermission = "read_only" | "write_access";
+
 export type TokenDto = {
   id: string;
   name: string;
   description?: string | null;
   prefix: string;
   status: TokenStatus;
+  permission: TokenPermission;
+  allowInteractive: boolean;
   expiresAt?: number | null;
   createdAt: number;
   lastUsedAt?: number | null;
@@ -194,6 +198,8 @@ export type TokenDto = {
 export type CreateTokenInput = {
   name: string;
   description?: string | null;
+  permission: TokenPermission;
+  allowInteractive: boolean;
   expiresAt?: number | null;
 };
 
@@ -206,6 +212,8 @@ export type UpdateTokenInput = {
   id: string;
   name: string;
   description?: string | null;
+  permission: TokenPermission;
+  allowInteractive: boolean;
   expiresAt?: number | null;
 };
 
@@ -266,6 +274,7 @@ export type AuditKind =
   | "session_opened"
   | "session_closed"
   | "command_executed"
+  | "file_read"
   | "input_sent"
   | "output_read"
   | "permission_denied"
@@ -297,6 +306,8 @@ export type AuditDto = {
   connectionId?: string | null;
   kind: AuditKind;
   outcome: AuditOutcome;
+  toolName?: string | null;
+  permission?: TokenPermission | null;
   command?: string | null;
   workingDir?: string | null;
   startedAt: number;

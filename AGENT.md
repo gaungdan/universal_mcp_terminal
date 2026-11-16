@@ -92,14 +92,17 @@ DTO 与 `types.ts` 必须字段同名同义，前端不做二次映射。
 
 - 地址：`http://127.0.0.1:47321/mcp`，仅监听回环；代码常量在 `crates/mcp-server/src/lib.rs`。
 - 鉴权链路：HTTP 层 Bearer 中间件 → `AccessControl::authenticate`（HMAC + 常量时间比较）→ 每个工具再做 `authorize_connection`；涉及会话的调用由 `SessionManager` 校验归属。
-- 9 个工具：`list_connections`、`get_connection_info`、`test_connection`、`open_session`、`execute_command`、`send_input`、`read_output`、`resize_terminal`、`close_session`（`TOOL_NAMES` 是白名单，新增工具要同步 `tool_definitions` 与文档）。
+- 10 个工具：`list_connections`、`get_connection_info`、`test_connection`、`open_session`、`execute_command`、`read_file`、`send_input`、`read_output`、`resize_terminal`、`close_session`（`TOOL_NAMES` 是白名单，新增工具要同步 `tool_definitions` 与文档）。
+- Token 权限只有 `ReadOnly`（默认）与 `WriteAccess`；`ReadOnly` 使用允许清单并拒绝未知命令，`WriteAccess` 允许普通写操作但拦截灾难命令与提权命令。
+- 交互式终端：`ReadOnly` 永远禁止；`WriteAccess` 还需 `allow_interactive=true`。交互式输入等同于完整 Shell，不做逐条命令过滤。
+- `execute_command`、`open_session`、`send_input` 都必须经过 `PermissionGate` 与 `SessionManager` 的双重校验。
 - 不支持的能力必须返回 `UnsupportedCapability`，不允许假装成功。
 - 日志只记录错误码与脱敏文本。
 
 ## 8. 安全不变量
 
 1. Token 只从 `Authorization` 头解析，任何工具参数里的 token 一律忽略。
-2. 高风险命令 + `FullAccess + 需确认` 在 MCP 通道按**拒绝**处理（无交互确认通道）。
+2. 命令权限以 Token 为准，不再读取全局执行模式；`sudo`/`su` 等提权命令对所有 Token 一律拒绝（尽力而为，最终依赖连接账号权限）。
 3. SSH 未知 Host Key 默认拒绝；信任需人工确认并落 `ssh_host_keys`。
 4. 撤销 Token / 禁用连接对已建立会话立即生效。
 5. 审计记录不可被业务逻辑跳过；拒绝也要记 `denied` 原因。
@@ -148,7 +151,7 @@ WSL Provider 用例需要本机真实 WSL 发行版，CI 上跳过属预期。
 
 ## 11. 已知限制
 
-- 无文件传输（SFTP/FTP），无终端录制回放。
+- 支持 SSH/SFTP 只读文件下载；无 FTP/TFTP、无文件上传、无终端录制回放。
 - MCP 通道无交互式高风险确认。
 - Telnet 未实现完整选项协商，提示符正则按设备调整。
 - WSL 能力仅 Windows。

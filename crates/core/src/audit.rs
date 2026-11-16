@@ -1,6 +1,7 @@
 use crate::ids::{AuditId, ConnectionId, SessionId, TokenId};
 use crate::session::ExecutionState;
 use crate::time::UnixMillis;
+use crate::token::TokenPermission;
 use serde::{Deserialize, Serialize};
 
 /// 审计事件类型。新增类型只能追加，不能修改已有语义。
@@ -10,6 +11,7 @@ pub enum AuditKind {
     SessionOpened,
     SessionClosed,
     CommandExecuted,
+    FileRead,
     InputSent,
     OutputRead,
     PermissionDenied,
@@ -43,6 +45,10 @@ pub struct AuditRecord {
     pub connection_id: Option<ConnectionId>,
     pub kind: AuditKind,
     pub outcome: AuditOutcome,
+    /// 触发该事件的 MCP 工具名；非 MCP 事件为空。
+    pub tool_name: Option<String>,
+    /// 事件发生时 Token 的权限等级；无 Token 的本地事件为空。
+    pub permission: Option<TokenPermission>,
     pub command: Option<String>,
     pub working_dir: Option<String>,
     pub started_at: UnixMillis,

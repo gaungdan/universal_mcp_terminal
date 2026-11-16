@@ -11,15 +11,20 @@ use umt_core::{
 use super::support::{
     RowExt, audit_kind_from_str, audit_kind_to_str, audit_outcome_from_str, audit_outcome_to_str,
     backend, bool_from_int, count_to_u64, execution_state_from_str, execution_state_to_str, narrow,
-    parse_id,
+    parse_id, token_permission_from_str, token_permission_to_str,
 };
 use crate::error::PersistenceError;
 use crate::models::NewAuditEntry;
 use crate::repo::AuditRepo;
 
-const AUDIT_COLUMNS: &str = "id, session_id, token_id, connection_id, kind, outcome, command, \
-                             working_dir, started_at, duration_ms, status, exit_code, \
-                             stdout_excerpt, stderr_excerpt, error, redacted";
+const AUDIT_COLUMNS: &str = "id, session_id, token_id, connection_id, kind, outcome, tool_name, \
+                             permission, command, working_dir, started_at, duration_ms, status, \
+                             exit_code, stdout_excerpt, stderr_excerpt, error, redacted";
+
+const AUDIT_GET_SQL: &str = "SELECT id, session_id, token_id, connection_id, kind, outcome, \
+                             tool_name, permission, command, working_dir, started_at, duration_ms, \
+                             status, exit_code, stdout_excerpt, stderr_excerpt, error, redacted \
+                             FROM audit_events WHERE id = ?";
 
 /// 审计事件的 SQLite 仓库。
 #[derive(Debug, Clone)]
@@ -59,6 +64,11 @@ fn audit_from_row(row: &SqliteRow) -> Result<AuditRecord, PersistenceError> {
             .transpose()?,
         kind: audit_kind_from_str(&row.text("kind")?)?,
         outcome: decode_outcome(&row.text("outcome")?)?,
+        tool_name: row.opt_text("tool_name")?,
+        permission: row
+            .opt_text("permission")?
+            .map(|raw| token_permission_from_str(&raw))
+            .transpose()?,
         command: row.opt_text("command")?,
         working_dir: row.opt_text("working_dir")?,
         started_at: UnixMillis(row.int("started_at")?),
@@ -112,16 +122,18 @@ impl AuditRepo for SqliteAuditRepo {
     async fn append(&self, entry: NewAuditEntry) -> Result<AuditId, PersistenceError> {
         let done = sqlx::query(
             "INSERT INTO audit_events \
-             (session_id, token_id, connection_id, kind, outcome, command, working_dir, \
-              started_at, duration_ms, status, exit_code, stdout_excerpt, stderr_excerpt, \
-              error, redacted) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             (session_id, token_id, connection_id, kind, outcome, tool_name, permission, \
+              command, working_dir, started_at, duration_ms, status, exit_code, \
+              stdout_excerpt, stderr_excerpt, error, redacted) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(entry.session_id.map(|id| id.to_string()))
         .bind(entry.token_id.map(|id| id.to_string()))
         .bind(entry.connection_id.map(|id| id.to_string()))
         .bind(audit_kind_to_str(entry.kind))
         .bind(audit_outcome_to_str(entry.outcome))
+        .bind(entry.tool_name)
+        .bind(entry.permission.map(token_permission_to_str))
         .bind(entry.command)
         .bind(entry.working_dir)
         .bind(entry.started_at.0)
@@ -171,15 +183,11 @@ impl AuditRepo for SqliteAuditRepo {
     }
 
     async fn get(&self, id: AuditId) -> Result<Option<AuditRecord>, PersistenceError> {
-        let row = sqlx::query(
-            "SELECT id, session_id, token_id, connection_id, kind, outcome, command, \
-             working_dir, started_at, duration_ms, status, exit_code, stdout_excerpt, \
-             stderr_excerpt, error, redacted FROM audit_events WHERE id = ?",
-        )
-        .bind(id.0)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(backend)?;
+        let row = sqlx::query(AUDIT_GET_SQL)
+            .bind(id.0)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(backend)?;
         row.as_ref().map(audit_from_row).transpose()
     }
 

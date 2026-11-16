@@ -1,9 +1,8 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import type { AuditDto } from "../../api/types";
 import { exportAudit, listActiveSessions, queryAudit } from "../../api/client";
 import EmptyState from "../../components/EmptyState";
 import SectionCard from "../../components/SectionCard";
-import StatusBadge from "../../components/StatusBadge";
 import { formatUnixMillis } from "../../lib/errors";
 import { useAsync } from "../../lib/useAsync";
 import AuditDetail from "./AuditDetail";
@@ -133,7 +132,6 @@ export default function AuditPage() {
                 <th>时间</th>
                 <th>操作</th>
                 <th>结果</th>
-                <th>执行状态</th>
                 <th>Token</th>
                 <th>连接</th>
                 <th>Session</th>
@@ -143,47 +141,58 @@ export default function AuditPage() {
             <tbody>
               {records.map((audit) => {
                 const isSelected = selected?.id === audit.id;
+                const toggle = () => setSelected(isSelected ? null : audit);
                 return (
-                  <tr
-                    key={audit.id}
-                    className={`audit-row${isSelected ? " audit-row--selected" : ""}`}
-                    tabIndex={0}
-                    onClick={() => setSelected(audit)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        setSelected(audit);
-                      }
-                    }}
-                  >
-                    <td className="audit-cell--nowrap">
-                      {formatUnixMillis(audit.startedAt)}
-                    </td>
-                    <td>{auditKindLabel(audit.kind)}</td>
-                    <td>
-                      <span className={`audit-outcome audit-outcome--${audit.outcome}`}>
-                        {auditOutcomeLabel(audit.outcome)}
-                      </span>
-                    </td>
-                    <td>
-                      <StatusBadge status={audit.state} />
-                    </td>
-                    <td title={audit.tokenId ?? undefined}>
-                      {abbreviateId(audit.tokenId)}
-                    </td>
-                    <td title={audit.connectionId ?? undefined}>
-                      {abbreviateId(audit.connectionId)}
-                    </td>
-                    <td title={audit.sessionId ?? undefined}>
-                      {abbreviateId(audit.sessionId)}
-                    </td>
-                    <td
-                      className="audit-cell--command"
-                      title={audit.command ?? undefined}
+                  <Fragment key={audit.id}>
+                    <tr
+                      className={`audit-row${isSelected ? " audit-row--selected" : ""}`}
+                      tabIndex={0}
+                      onClick={toggle}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          toggle();
+                        }
+                      }}
                     >
-                      {summarizeCommand(audit.command)}
-                    </td>
-                  </tr>
+                      <td className="audit-cell--nowrap">
+                        {formatUnixMillis(audit.startedAt)}
+                      </td>
+                      <td>{auditKindLabel(audit.kind)}</td>
+                      <td>
+                        <span className={`audit-outcome audit-outcome--${audit.outcome}`}>
+                          {auditOutcomeLabel(audit.outcome)}
+                        </span>
+                      </td>
+                      <td title={audit.tokenId ?? undefined}>
+                        {abbreviateId(audit.tokenId, 10)}
+                      </td>
+                      <td title={audit.connectionId ?? undefined}>
+                        {abbreviateId(audit.connectionId, 10)}
+                      </td>
+                      <td title={audit.sessionId ?? undefined}>
+                        {abbreviateId(audit.sessionId, 10)}
+                      </td>
+                      <td>
+                        <span
+                          className="audit-cell__command"
+                          title={audit.command ?? undefined}
+                        >
+                          {summarizeCommand(audit.command)}
+                        </span>
+                      </td>
+                    </tr>
+                    {isSelected ? (
+                      <tr className="audit-detail-row">
+                        <td colSpan={7}>
+                          <AuditDetail
+                            audit={audit}
+                            onClose={() => setSelected(null)}
+                          />
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
                 );
               })}
             </tbody>
@@ -285,33 +294,22 @@ export default function AuditPage() {
             ) : null}
           </SectionCard>
 
-          <div
-            className={`audit-layout${selected ? " audit-layout--with-detail" : ""}`}
+          <SectionCard
+            title="命令审计"
+            description={description}
+            actions={
+              <button
+                type="button"
+                className="btn btn--ghost btn--small"
+                onClick={reload}
+                disabled={loading}
+              >
+                刷新
+              </button>
+            }
           >
-            <SectionCard
-              title="命令审计"
-              description={description}
-              actions={
-                <button
-                  type="button"
-                  className="btn btn--ghost btn--small"
-                  onClick={reload}
-                  disabled={loading}
-                >
-                  刷新
-                </button>
-              }
-            >
-              {content}
-            </SectionCard>
-            {selected ? (
-              <AuditDetail
-                key={selected.id}
-                audit={selected}
-                onClose={() => setSelected(null)}
-              />
-            ) : null}
-          </div>
+            {content}
+          </SectionCard>
         </div>
       ) : (
         <div

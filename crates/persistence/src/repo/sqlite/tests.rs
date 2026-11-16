@@ -55,6 +55,8 @@ fn sample_token(name: &str, prefix: &str, created_at: i64) -> crate::TokenRecord
             description: None,
             prefix: prefix.to_string(),
             status: TokenStatus::Active,
+            permission: umt_core::TokenPermission::ReadOnly,
+            allow_interactive: false,
             expires_at: None,
             created_at: UnixMillis(created_at),
             last_used_at: None,
@@ -97,6 +99,8 @@ fn sample_audit(
         connection_id: Some(connection_id),
         kind,
         outcome: AuditOutcome::Allowed,
+        tool_name: None,
+        permission: None,
         command: Some("ls".to_string()),
         working_dir: Some("/tmp".to_string()),
         started_at: UnixMillis(started_at),
@@ -810,6 +814,12 @@ async fn migration_splits_legacy_status_encoding() {
         .execute(&pool)
         .await
         .expect("执行 v2 迁移");
+    sqlx::raw_sql(include_str!(
+        "../../../migrations/0005_audit_permission_context.sql"
+    ))
+    .execute(&pool)
+    .await
+    .expect("执行 v5 迁移");
 
     let (outcome, status): (String, String) =
         sqlx::query_as("SELECT outcome, status FROM audit_events WHERE id = 1")

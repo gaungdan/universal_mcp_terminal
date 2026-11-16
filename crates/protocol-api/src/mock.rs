@@ -3,7 +3,10 @@
 use crate::error::{ProviderError, SessionError};
 use crate::provider::{ProtocolDescriptor, ProtocolProvider};
 use crate::schema::{ConfigField, ConfigSchema, FieldKind, FieldValidation, SelectOption};
-use crate::session::{ConnectOptions, ExecRequest, ExecResult, OutputChunk, TerminalSession};
+use crate::session::{
+    ConnectOptions, ExecRequest, ExecResult, FileChunk, FileReadRequest, OutputChunk,
+    TerminalSession,
+};
 use crate::test_result::{ConnectionTestResult, TestStep};
 use async_trait::async_trait;
 use umt_core::{Capability, CapabilitySet, ConnectionConfig, ExecutionState, SessionId};
@@ -73,6 +76,7 @@ impl MockProvider {
                     Capability::Exec,
                     Capability::InteractiveTerminal,
                     Capability::TerminalResize,
+                    Capability::FileRead,
                 ]),
             },
             schema,
@@ -187,6 +191,23 @@ impl TerminalSession for MockSession {
         }
         let _ = (rows, cols);
         Ok(())
+    }
+
+    async fn read_file(&mut self, request: FileReadRequest) -> Result<FileChunk, SessionError> {
+        if self.closed {
+            return Err(SessionError::Closed);
+        }
+        let content = b"mock-file-content\n";
+        let offset = request.offset.min(content.len() as u64) as usize;
+        let end = (offset + request.max_bytes.max(1)).min(content.len());
+        Ok(FileChunk {
+            path: request.path,
+            offset: offset as u64,
+            next_offset: end as u64,
+            size: Some(content.len() as u64),
+            eof: end >= content.len(),
+            data: content[offset..end].to_vec(),
+        })
     }
 
     async fn exec(&mut self, request: ExecRequest) -> Result<ExecResult, SessionError> {

@@ -11,6 +11,8 @@ use std::collections::BTreeMap;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use base64::Engine as _;
+
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ErrorCode, Implementation, JsonObject,
     ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerConfig,
@@ -24,11 +26,12 @@ use umt_core::{
     ExecutionState, PageRequest, SessionId, SessionInfo, TokenContext, UmtError, UnixMillis,
 };
 use umt_persistence::NewAuditEntry;
-use umt_protocol_api::{ExecRequest, ExecResult, ProtocolProvider, SecretValues};
+use umt_protocol_api::{ExecRequest, ExecResult, FileReadRequest, ProtocolProvider, SecretValues};
 use umt_security::EncryptedSecret;
-use umt_session_manager::OpenSessionRequest;
+use umt_session_manager::{OpenSessionRequest, SessionPurpose};
 
 use crate::deps::McpDeps;
+use crate::permission::PermissionGate;
 use crate::tools;
 
 /// 默认单次读取输出上限（字节）。
@@ -39,9 +42,20 @@ const MAX_READ_BYTES: usize = 1024 * 1024;
 const DEFAULT_EXEC_TIMEOUT_MS: u64 = 30_000;
 /// 非交互命令超时上限。
 const MAX_EXEC_TIMEOUT_MS: u64 = 600_000;
+/// 文件读取默认分块大小。
+const DEFAULT_FILE_READ_BYTES: usize = 64 * 1024;
+/// 文件读取单块上限，避免 base64 膨胀后响应过大。
+const MAX_FILE_READ_BYTES: usize = 128 * 1024;
 /// 临时会话的默认终端尺寸（命令执行为非交互，尺寸不影响结果）。
 const TEMP_SESSION_ROWS: u16 = 24;
 const TEMP_SESSION_COLS: u16 = 80;
+
+struct SessionOpenSpec {
+    rows: u16,
+    cols: u16,
+    terminal_type: Option<String>,
+    purpose: SessionPurpose,
+}
 
 /// rmcp 的 `ServerHandler` 实现。
 #[derive(Clone)]
@@ -87,12 +101,14 @@ impl UmtMcpServer {
         name: &str,
         args: &JsonObject,
     ) -> Result<Value, UmtError> {
+        PermissionGate::authorize_tool(token, name)?;
         match name {
             tools::LIST_CONNECTIONS => self.list_connections(token).await,
             tools::GET_CONNECTION_INFO => self.get_connection_info(token, args).await,
             tools::TEST_CONNECTION => self.test_connection(token, args).await,
             tools::OPEN_SESSION => self.open_session_tool(token, args).await,
             tools::EXECUTE_COMMAND => self.execute_command(token, args).await,
+            tools::READ_FILE => self.read_file(token, args).await,
             tools::SEND_INPUT => self.send_input(token, args).await,
             tools::READ_OUTPUT => self.read_output(token, args).await,
             tools::RESIZE_TERMINAL => self.resize_terminal(token, args).await,
@@ -121,6 +137,8 @@ impl UmtMcpServer {
             connection_id: None,
             kind: AuditKind::PermissionDenied,
             outcome: AuditOutcome::Denied,
+            tool_name: Some(name.to_string()),
+            permission: token.map(|context| context.permission),
             command: Some(denied_command(name, args)),
             working_dir: None,
             started_at: UnixMillis::now(),
@@ -239,9 +257,12 @@ impl UmtMcpServer {
                 token,
                 connection,
                 provider,
-                args.rows,
-                args.cols,
-                args.terminal_type,
+                SessionOpenSpec {
+                    rows: args.rows,
+                    cols: args.cols,
+                    terminal_type: args.terminal_type,
+                    purpose: SessionPurpose::Interactive,
+                },
             )
             .await?;
         Ok(session_value(&info))
@@ -288,16 +309,15 @@ impl UmtMcpServer {
                         token,
                         connection,
                         provider,
-                        TEMP_SESSION_ROWS,
-                        TEMP_SESSION_COLS,
-                        None,
+                        SessionOpenSpec {
+                            rows: TEMP_SESSION_ROWS,
+                            cols: TEMP_SESSION_COLS,
+                            terminal_type: None,
+                            purpose: SessionPurpose::Exec,
+                        },
                     )
                     .await?;
-                let outcome = self
-                    .deps
-                    .sessions
-                    .exec(info.id, token.token_id, request)
-                    .await;
+                let outcome = self.deps.sessions.exec(info.id, token, request).await;
                 // 临时会话无论成功失败都要关闭，避免泄漏连接。
                 let _ = self
                     .deps
@@ -313,14 +333,75 @@ impl UmtMcpServer {
                 let provider = self.deps.protocols.require(&info.protocol_id)?;
                 ensure_capability(&provider.descriptor().capabilities, Capability::Exec)?;
 
-                let result = self
-                    .deps
-                    .sessions
-                    .exec(session_id, token.token_id, request)
-                    .await?;
+                let result = self.deps.sessions.exec(session_id, token, request).await?;
                 Ok(exec_value(&info, &result))
             }
         }
+    }
+
+    async fn read_file(&self, token: &TokenContext, args: &JsonObject) -> Result<Value, UmtError> {
+        let args: tools::ReadFileArgs = parse_args(args)?;
+        let path = args.path.trim().to_string();
+        if path.is_empty() {
+            return Err(UmtError::Validation("path 不能为空".into()));
+        }
+        if path.contains('\0') {
+            return Err(UmtError::Validation("path 不能包含 NUL 字符".into()));
+        }
+        let connection_id = parse_id::<ConnectionId>(&args.connection_id, "连接")?;
+        let connection = self
+            .deps
+            .access
+            .authorize_connection(token, connection_id)
+            .await?;
+        let provider = self.deps.protocols.require(&connection.protocol_id)?;
+        ensure_capability(&provider.descriptor().capabilities, Capability::FileRead)?;
+
+        let offset = args.offset.unwrap_or(0);
+        let max_bytes = args
+            .max_bytes
+            .unwrap_or(DEFAULT_FILE_READ_BYTES)
+            .clamp(1, MAX_FILE_READ_BYTES);
+
+        let info = self
+            .open_session(
+                token,
+                connection,
+                provider,
+                SessionOpenSpec {
+                    rows: TEMP_SESSION_ROWS,
+                    cols: TEMP_SESSION_COLS,
+                    terminal_type: None,
+                    purpose: SessionPurpose::Exec,
+                },
+            )
+            .await?;
+        let outcome = self
+            .deps
+            .sessions
+            .read_file(
+                info.id,
+                token,
+                FileReadRequest::new(path.clone(), offset, max_bytes),
+            )
+            .await;
+        let _ = self
+            .deps
+            .sessions
+            .close(info.id, token.token_id, "file_read_finished")
+            .await;
+        let chunk = outcome?;
+        let data_base64 = base64::engine::general_purpose::STANDARD.encode(&chunk.data);
+
+        Ok(json!({
+            "connection_id": info.connection_id.to_string(),
+            "path": chunk.path,
+            "offset": chunk.offset,
+            "next_offset": chunk.next_offset,
+            "size": chunk.size,
+            "eof": chunk.eof,
+            "data_base64": data_base64,
+        }))
     }
 
     async fn send_input(&self, token: &TokenContext, args: &JsonObject) -> Result<Value, UmtError> {
@@ -329,7 +410,7 @@ impl UmtMcpServer {
         // SessionManager 会校验会话归属，跨 Token 操作直接拒绝。
         self.deps
             .sessions
-            .write(session_id, token.token_id, args.input.as_bytes())
+            .write(session_id, token, args.input.as_bytes())
             .await?;
         Ok(json!({
             "session_id": session_id.to_string(),
@@ -414,9 +495,7 @@ impl UmtMcpServer {
         token: &TokenContext,
         connection: Connection,
         provider: Arc<dyn ProtocolProvider>,
-        rows: u16,
-        cols: u16,
-        terminal_type: Option<String>,
+        spec: SessionOpenSpec,
     ) -> Result<SessionInfo, UmtError> {
         let config = self.load_config(&connection).await?;
         let secrets = self.load_secrets(connection.id).await?;
@@ -428,13 +507,14 @@ impl UmtMcpServer {
                 provider,
                 OpenSessionRequest {
                     context: token.clone(),
+                    purpose: spec.purpose,
                     connection,
                     config,
                     secrets,
                     expected_host_key_fingerprint,
-                    rows,
-                    cols,
-                    terminal_type,
+                    rows: spec.rows,
+                    cols: spec.cols,
+                    terminal_type: spec.terminal_type,
                     working_dir: None,
                 },
             )
@@ -894,7 +974,7 @@ mod tests {
     async fn full_session_flow_works_over_mock_provider() {
         let env = TestEnv::new();
         let server = env.server();
-        let token = env.token("claude").await;
+        let token = env.write_token("claude").await;
         let connection = env.connection("mock-conn", "mock").await;
         env.grant(&token, connection.id).await;
         env.configure(connection.id, "mock", json!({ "host": "local" }));
@@ -1018,11 +1098,160 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn read_only_token_cannot_open_interactive_or_write() {
+        let env = TestEnv::new();
+        let server = env.server();
+        let token = env.token("reader").await;
+        let connection = env.connection("mock-conn", "mock").await;
+        env.grant(&token, connection.id).await;
+        env.configure(connection.id, "mock", json!({ "host": "local" }));
+
+        let error = server
+            .execute_tool(
+                &token,
+                tools::OPEN_SESSION,
+                &args(json!({
+                    "connection_id": connection.id.to_string(),
+                    "rows": 24,
+                    "cols": 80,
+                })),
+            )
+            .await
+            .expect_err("ReadOnly 不允许打开交互式会话");
+        assert_eq!(error.code(), "access_denied");
+
+        let error = server
+            .execute_tool(
+                &token,
+                tools::EXECUTE_COMMAND,
+                &args(json!({
+                    "connection_id": connection.id.to_string(),
+                    "command": "touch /tmp/umt-forbidden",
+                })),
+            )
+            .await
+            .expect_err("ReadOnly 不允许写操作");
+        assert_eq!(error.code(), "access_denied");
+
+        let page = env
+            .repos
+            .audit
+            .query(&AuditQuery {
+                kind: Some(AuditKind::PermissionDenied),
+                outcome: Some(AuditOutcome::Denied),
+                ..AuditQuery::default()
+            })
+            .await
+            .expect("查询审计失败");
+        assert!(
+            page.total >= 2,
+            "交互式与命令拒绝都应写入审计，实际 {}",
+            page.total
+        );
+        assert!(
+            page.items
+                .iter()
+                .any(|item| item.tool_name.as_deref() == Some(tools::OPEN_SESSION)),
+            "审计应记录被拒绝的工具名"
+        );
+    }
+
+    #[tokio::test]
+    async fn write_access_token_still_cannot_escalate() {
+        let env = TestEnv::new();
+        let server = env.server();
+        let token = env.write_token("writer").await;
+        let connection = env.connection("mock-conn", "mock").await;
+        env.grant(&token, connection.id).await;
+        env.configure(connection.id, "mock", json!({ "host": "local" }));
+
+        let error = server
+            .execute_tool(
+                &token,
+                tools::EXECUTE_COMMAND,
+                &args(json!({
+                    "connection_id": connection.id.to_string(),
+                    "command": "sudo id",
+                })),
+            )
+            .await
+            .expect_err("WriteAccess 仍必须拒绝提权命令");
+        assert_eq!(error.code(), "access_denied");
+        assert!(error.to_string().contains("提权"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn read_file_returns_chunked_base64() {
+        let env = TestEnv::new();
+        let server = env.server();
+        let token = env.token("reader").await;
+        let connection = env.connection("mock-conn", "mock").await;
+        env.grant(&token, connection.id).await;
+        env.configure(connection.id, "mock", json!({ "host": "local" }));
+
+        let first = server
+            .execute_tool(
+                &token,
+                tools::READ_FILE,
+                &args(json!({
+                    "connection_id": connection.id.to_string(),
+                    "path": "/tmp/demo.txt",
+                    "max_bytes": 5,
+                })),
+            )
+            .await
+            .expect("读取文件失败");
+        assert_eq!(first["path"], "/tmp/demo.txt");
+        assert_eq!(first["offset"], 0);
+        assert_eq!(first["next_offset"], 5);
+        assert_eq!(first["size"], 18);
+        assert_eq!(first["eof"], false);
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(first["data_base64"].as_str().expect("缺少 base64"))
+            .expect("base64 解码失败");
+        assert_eq!(bytes, b"mock-");
+
+        let second = server
+            .execute_tool(
+                &token,
+                tools::READ_FILE,
+                &args(json!({
+                    "connection_id": connection.id.to_string(),
+                    "path": "/tmp/demo.txt",
+                    "offset": 5,
+                    "max_bytes": 1024,
+                })),
+            )
+            .await
+            .expect("读取文件失败");
+        assert_eq!(second["offset"], 5);
+        assert_eq!(second["next_offset"], 18);
+        assert_eq!(second["eof"], true);
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(second["data_base64"].as_str().expect("缺少 base64"))
+            .expect("base64 解码失败");
+        assert_eq!(bytes, b"file-content\n");
+
+        let page = env
+            .repos
+            .audit
+            .query(&AuditQuery {
+                kind: Some(AuditKind::FileRead),
+                outcome: Some(AuditOutcome::Allowed),
+                ..AuditQuery::default()
+            })
+            .await
+            .expect("查询审计失败");
+        assert_eq!(page.total, 2);
+        assert_eq!(page.items[0].command.as_deref(), Some("/tmp/demo.txt"));
+    }
+
+    #[tokio::test]
     async fn another_token_cannot_touch_the_session() {
         let env = TestEnv::new();
         let server = env.server();
-        let owner = env.token("owner").await;
-        let intruder = env.token("intruder").await;
+        let owner = env.write_token("owner").await;
+        let intruder = env.write_token("intruder").await;
         let connection = env.connection("mock-conn", "mock").await;
         env.grant(&owner, connection.id).await;
         env.configure(connection.id, "mock", json!({ "host": "local" }));
@@ -1069,7 +1298,7 @@ mod tests {
     async fn key_version_mismatch_is_reported() {
         let env = TestEnv::new();
         let server = env.server();
-        let token = env.token("claude").await;
+        let token = env.write_token("claude").await;
         let connection = env.connection("mock-conn", "mock").await;
         env.grant(&token, connection.id).await;
         env.configure(connection.id, "mock", json!({ "host": "local" }));

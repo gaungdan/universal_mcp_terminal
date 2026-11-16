@@ -1,4 +1,4 @@
-//! 9 个 MCP 工具的定义与入参结构。
+//! 10 个 MCP 工具的定义与入参结构。
 //!
 //! 这里只描述「工具长什么样」，不包含任何权限判断；鉴权与能力校验在 `handler` 中完成。
 //! 入参 JSON Schema 由 `schemars` 根据参数结构生成，避免手写 Schema 与代码脱节。
@@ -18,6 +18,8 @@ pub const TEST_CONNECTION: &str = "test_connection";
 pub const OPEN_SESSION: &str = "open_session";
 /// 执行非交互式命令。
 pub const EXECUTE_COMMAND: &str = "execute_command";
+/// 只读读取远程文件分块。
+pub const READ_FILE: &str = "read_file";
 /// 向已有会话发送输入。
 pub const SEND_INPUT: &str = "send_input";
 /// 增量读取会话输出。
@@ -28,12 +30,13 @@ pub const RESIZE_TERMINAL: &str = "resize_terminal";
 pub const CLOSE_SESSION: &str = "close_session";
 
 /// 全部工具名，顺序与 `tool_definitions` 一致。
-pub const TOOL_NAMES: [&str; 9] = [
+pub const TOOL_NAMES: [&str; 10] = [
     LIST_CONNECTIONS,
     GET_CONNECTION_INFO,
     TEST_CONNECTION,
     OPEN_SESSION,
     EXECUTE_COMMAND,
+    READ_FILE,
     SEND_INPUT,
     READ_OUTPUT,
     RESIZE_TERMINAL,
@@ -77,6 +80,19 @@ pub struct ExecuteCommandArgs {
     pub working_directory: Option<String>,
     /// 超时时间（毫秒），默认 30000。
     pub timeout_ms: Option<u64>,
+}
+
+/// `read_file` 参数。
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ReadFileArgs {
+    /// 连接 ID。
+    pub connection_id: String,
+    /// 远程文件绝对路径。
+    pub path: String,
+    /// 起始字节偏移，默认 0。
+    pub offset: Option<u64>,
+    /// 单次读取字节数，默认 65536，上限 131072。
+    pub max_bytes: Option<usize>,
 }
 
 /// `send_input` 参数。
@@ -137,6 +153,10 @@ pub fn tool_definitions() -> Vec<Tool> {
             EXECUTE_COMMAND,
             "执行非交互式命令。传 connection_id 时自动开临时会话并在结束后关闭；协议必须声明 exec 能力。",
         ),
+        definition::<ReadFileArgs>(
+            READ_FILE,
+            "只读读取远程文件分块，返回 base64 数据、下一偏移与 eof；协议必须声明 file_read 能力。",
+        ),
         definition::<SendInputArgs>(SEND_INPUT, "向已有交互式会话发送原始输入。"),
         definition::<ReadOutputArgs>(
             READ_OUTPUT,
@@ -171,7 +191,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn definitions_cover_all_nine_tools() {
+    fn definitions_cover_all_tools() {
         let tools = tool_definitions();
         assert_eq!(tools.len(), TOOL_NAMES.len());
 

@@ -33,10 +33,10 @@ export default function AuditDetail({ audit, onClose }: AuditDetailProps) {
   };
 
   return (
-    <aside className="section-card audit-detail" aria-label="审计详情">
+    <section className="audit-detail" aria-label="审计详情">
       <header className="audit-detail__header">
         <div>
-          <h2 className="audit-detail__title">审计详情 #{audit.id}</h2>
+          <h3 className="audit-detail__title">审计详情 #{audit.id}</h3>
           <p className="audit-detail__subtitle">
             {formatUnixMillis(audit.startedAt)}
           </p>
@@ -56,7 +56,7 @@ export default function AuditDetail({ audit, onClose }: AuditDetailProps) {
             onClick={onClose}
             aria-label="关闭详情"
           >
-            关闭
+            收起
           </button>
         </div>
       </header>
@@ -73,6 +73,20 @@ export default function AuditDetail({ audit, onClose }: AuditDetailProps) {
           <div>
             <dt>操作类型</dt>
             <dd>{auditKindLabel(audit.kind)}</dd>
+          </div>
+          <div>
+            <dt>MCP 工具</dt>
+            <dd>{audit.toolName ?? "—"}</dd>
+          </div>
+          <div>
+            <dt>权限</dt>
+            <dd>
+              {audit.permission === "write_access"
+                ? "WriteAccess"
+                : audit.permission === "read_only"
+                  ? "ReadOnly"
+                  : "—"}
+            </dd>
           </div>
           <div>
             <dt>执行结果</dt>
@@ -134,6 +148,6 @@ export default function AuditDetail({ audit, onClose }: AuditDetailProps) {
           </pre>
         </details>
       </div>
-    </aside>
+    </section>
   );
 }

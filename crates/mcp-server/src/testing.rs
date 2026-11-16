@@ -6,7 +6,9 @@ use std::sync::{Arc, Mutex};
 use futures::future::BoxFuture;
 use umt_access_control::AccessControl;
 use umt_audit::AuditService;
-use umt_core::{Connection, ConnectionConfig, ConnectionId, TokenContext, UmtError, UnixMillis};
+use umt_core::{
+    Connection, ConnectionConfig, ConnectionId, TokenContext, TokenPermission, UmtError, UnixMillis,
+};
 use umt_persistence::{ConnectionRepo, InMemoryRepos, SecretBlob, SecretRepo};
 use umt_protocol_api::MockProvider;
 use umt_protocol_registry::ProtocolRegistry;
@@ -117,6 +119,19 @@ impl TestEnv {
             .create_token(name, None, None)
             .await
             .expect("创建 Token 失败");
+        self.access
+            .authenticate(&created.plaintext, None)
+            .await
+            .expect("认证失败")
+    }
+
+    /// WriteAccess + 交互式终端，用于会话相关测试。
+    pub(crate) async fn write_token(&self, name: &str) -> TokenContext {
+        let created = self
+            .access
+            .create_token_with_permissions(name, None, None, TokenPermission::WriteAccess, true)
+            .await
+            .expect("创建 WriteAccess Token 失败");
         self.access
             .authenticate(&created.plaintext, None)
             .await

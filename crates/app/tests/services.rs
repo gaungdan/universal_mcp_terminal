@@ -11,7 +11,7 @@ use umt_app::ipc::dto::{
     SetGrantInput,
 };
 use umt_app::services;
-use umt_core::{Connection, ConnectionId, UnixMillis};
+use umt_core::{Connection, ConnectionId, TokenPermission, UnixMillis};
 use umt_persistence::{ConnectionRepo, SecretBlob, SecretRepo};
 use umt_security::{KeyStore, StaticKeyStore};
 use uuid::Uuid;
@@ -101,6 +101,8 @@ async fn services_survive_restart_and_secrets_roundtrip() {
         CreateTokenInput {
             name: "claude".into(),
             description: None,
+            permission: TokenPermission::ReadOnly,
+            allow_interactive: false,
             expires_at: None,
         },
     )
@@ -211,11 +213,25 @@ async fn unauthorized_connection_is_rejected() {
         CreateTokenInput {
             name: "claude".into(),
             description: None,
+            permission: TokenPermission::ReadOnly,
+            allow_interactive: false,
             expires_at: None,
         },
     )
     .await
     .expect("创建 Token 失败");
+    // 新 Token 默认授权全部现有连接，这里显式撤销以验证越权拒绝。
+    services::tokens::set_grant(
+        &state,
+        SetGrantInput {
+            token_id: token.token.id.clone(),
+            connection_id: created.id.clone(),
+            allowed: false,
+        },
+    )
+    .await
+    .expect("撤销授权失败");
+
     let context = state
         .access
         .authenticate(&token.plaintext, None)

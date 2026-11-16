@@ -9,7 +9,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use umt_core::{
     AuditId, AuditQuery, AuditRecord, Connection, ConnectionId, Page, PageRequest, SessionId,
-    SessionInfo, SessionState, Token, TokenId, TokenStatus, UnixMillis,
+    SessionInfo, SessionState, Token, TokenId, TokenPermission, TokenStatus, UnixMillis,
 };
 
 use super::{
@@ -272,6 +272,21 @@ impl TokenRepo for InMemoryTokenRepo {
         record.token.name = name.to_string();
         record.token.description = description.map(str::to_string);
         record.token.expires_at = expires_at;
+        Ok(())
+    }
+
+    async fn set_permissions(
+        &self,
+        id: TokenId,
+        permission: TokenPermission,
+        allow_interactive: bool,
+    ) -> Result<(), PersistenceError> {
+        let mut map = self.inner.write().await;
+        let record = map
+            .get_mut(&id)
+            .ok_or_else(|| PersistenceError::not_found("Token", id.to_string()))?;
+        record.token.permission = permission;
+        record.token.allow_interactive = allow_interactive;
         Ok(())
     }
 
@@ -588,6 +603,8 @@ impl AuditRepo for InMemoryAuditRepo {
             connection_id: entry.connection_id,
             kind: entry.kind,
             outcome: entry.outcome,
+            tool_name: entry.tool_name,
+            permission: entry.permission,
             command: entry.command,
             working_dir: entry.working_dir,
             started_at: entry.started_at,
@@ -790,6 +807,8 @@ mod tests {
                 description: None,
                 prefix: prefix.to_string(),
                 status: TokenStatus::Active,
+                permission: TokenPermission::ReadOnly,
+                allow_interactive: false,
                 expires_at: None,
                 created_at: UnixMillis(created_at),
                 last_used_at: None,
@@ -827,6 +846,8 @@ mod tests {
             connection_id: None,
             kind,
             outcome: AuditOutcome::Allowed,
+            tool_name: None,
+            permission: None,
             command: Some("ls".to_string()),
             working_dir: Some("/tmp".to_string()),
             started_at: UnixMillis(started_at),

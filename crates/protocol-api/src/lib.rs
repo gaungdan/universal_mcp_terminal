@@ -19,6 +19,7 @@ pub use schema::{
     ConfigField, ConfigSchema, FieldCondition, FieldKind, FieldValidation, SelectOption,
 };
 pub use session::{
-    ConnectOptions, ExecRequest, ExecResult, OutputChunk, SecretValues, TerminalSession,
+    ConnectOptions, ExecRequest, ExecResult, FileChunk, FileReadRequest, OutputChunk, SecretValues,
+    TerminalSession,
 };
 pub use test_result::{ConnectionTestResult, HostKeyInfo, TestStep, TestStepStatus};

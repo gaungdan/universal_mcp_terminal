@@ -106,6 +106,21 @@ pub trait TokenRepo: Send + Sync {
         ))
     }
 
+    /// 更新 Token 权限等级与交互式终端开关。
+    ///
+    /// 默认实现返回错误，具体的仓库实现应当覆盖它。
+    async fn set_permissions(
+        &self,
+        id: TokenId,
+        permission: umt_core::TokenPermission,
+        allow_interactive: bool,
+    ) -> Result<(), PersistenceError> {
+        let _ = (id, permission, allow_interactive);
+        Err(PersistenceError::InvalidData(
+            "当前 Token 仓库不支持权限更新".into(),
+        ))
+    }
+
     /// 刷新最近使用时间。
     async fn touch_last_used(&self, id: TokenId, at: UnixMillis) -> Result<(), PersistenceError>;
 

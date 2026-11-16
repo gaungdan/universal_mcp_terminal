@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use umt_core::{
-    AppEvent, AuditKind, AuditOutcome, Page, PageRequest, SessionInfo, Token, TokenStatus,
-    UmtError, UnixMillis,
+    AppEvent, AuditKind, AuditOutcome, Page, PageRequest, SessionInfo, Token, TokenPermission,
+    TokenStatus, UmtError, UnixMillis,
 };
 use umt_protocol_api::{ConfigSchema, ConnectionTestResult, ExecResult};
 
@@ -171,6 +171,8 @@ pub struct TokenDto {
     pub description: Option<String>,
     pub prefix: String,
     pub status: TokenStatus,
+    pub permission: TokenPermission,
+    pub allow_interactive: bool,
     pub expires_at: Option<UnixMillis>,
     pub created_at: UnixMillis,
     pub last_used_at: Option<UnixMillis>,
@@ -184,6 +186,8 @@ impl From<Token> for TokenDto {
             description: value.description,
             prefix: value.prefix,
             status: value.status,
+            permission: value.permission,
+            allow_interactive: value.allow_interactive,
             expires_at: value.expires_at,
             created_at: value.created_at,
             last_used_at: value.last_used_at,
@@ -196,6 +200,10 @@ impl From<Token> for TokenDto {
 pub struct CreateTokenInput {
     pub name: String,
     pub description: Option<String>,
+    #[serde(default)]
+    pub permission: TokenPermission,
+    #[serde(default)]
+    pub allow_interactive: bool,
     pub expires_at: Option<UnixMillis>,
 }
 
@@ -213,6 +221,10 @@ pub struct UpdateTokenInput {
     pub id: String,
     pub name: String,
     pub description: Option<String>,
+    #[serde(default)]
+    pub permission: TokenPermission,
+    #[serde(default)]
+    pub allow_interactive: bool,
     pub expires_at: Option<UnixMillis>,
 }
 
@@ -298,6 +310,8 @@ pub struct AuditDto {
     pub connection_id: Option<String>,
     pub kind: AuditKind,
     pub outcome: AuditOutcome,
+    pub tool_name: Option<String>,
+    pub permission: Option<TokenPermission>,
     pub command: Option<String>,
     pub working_dir: Option<String>,
     pub started_at: UnixMillis,

@@ -243,6 +243,8 @@ async fn record_denied(audit: &umt_audit::AuditService, message: &str) {
         connection_id: None,
         kind: AuditKind::PermissionDenied,
         outcome: AuditOutcome::Denied,
+        tool_name: None,
+        permission: None,
         command: Some("mcp_http.authenticate".to_string()),
         working_dir: None,
         started_at: UnixMillis::now(),

@@ -56,6 +56,8 @@ function makeToken(overrides: Partial<TokenDto> = {}): TokenDto {
     description: null,
     prefix: "abc123",
     status: "active",
+    permission: "read_only",
+    allowInteractive: false,
     expiresAt: null,
     createdAt: 1_760_000_000_000,
     lastUsedAt: null,
@@ -189,50 +191,50 @@ describe("首页 - MCP 服务", () => {
 });
 
 describe("首页 - 快速开始", () => {
-  it("创建 Token 后自动生成配置，提示词包含该配置", async () => {
+  it("没有 Token 时在下拉框选择新建，创建后直接生成提示词", async () => {
     const config = makeConfig(PLAINTEXT);
     api.getTokenMcpConfig.mockResolvedValue(config);
 
     render(<HomePage />);
 
-    fireEvent.change(await screen.findByLabelText("Token 名称"), {
+    const step2 = scopeToStep("选择访问 Token");
+    const select = await within(step2).findByLabelText("访问 Token");
+    expect(select).toHaveValue("__new__");
+
+    fireEvent.change(within(step2).getByLabelText("Token 名称"), {
       target: { value: "AI Client" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "创建 Token" }));
+    fireEvent.click(within(step2).getByRole("button", { name: "创建 Token" }));
 
     await waitFor(() =>
-      expect(api.createToken).toHaveBeenCalledWith({ name: "AI Client" }),
+      expect(api.createToken).toHaveBeenCalledWith({
+        name: "AI Client",
+        permission: "read_only",
+        allowInteractive: false,
+      }),
     );
-    expect(await screen.findByText(/Token 已创建/)).toBeInTheDocument();
     await waitFor(() =>
       expect(api.getTokenMcpConfig).toHaveBeenCalledWith("t-new"),
     );
+    expect(within(step2).getByLabelText("访问 Token")).toHaveValue("t-new");
 
-    const step3 = scopeToStep("选择访问 Token");
-    const shownConfig = within(step3).getByTestId("mcp-config");
-    await waitFor(() => expect(shownConfig).toHaveTextContent(PLAINTEXT));
-    expect(shownConfig).toHaveTextContent(`"transport": "streamable-http"`);
-    expect(shownConfig).toHaveTextContent(ENDPOINT);
+    const step3 = scopeToStep("复制提示词");
+    expect(within(step3).queryByTestId("ai-prompt")).not.toBeInTheDocument();
+    const copyButton = within(step3).getByRole("button", {
+      name: "复制接入提示词",
+    });
+    await waitFor(() => expect(copyButton).toBeEnabled());
 
-    const step4 = scopeToStep("复制提示词");
-    const prompt = within(step4).getByTestId("ai-prompt");
-    expect(prompt).toHaveTextContent(PLAINTEXT);
-    expect(prompt).toHaveTextContent("tools/list");
-
-    fireEvent.click(within(step3).getByRole("button", { name: "复制配置" }));
+    fireEvent.click(copyButton);
     await waitFor(() => expect(writeTextMock).toHaveBeenCalledTimes(1));
-    expect(writeTextMock.mock.calls[0][0]).toBe(config);
-
-    fireEvent.click(within(step4).getByRole("button", { name: "复制接入提示词" }));
-    await waitFor(() => expect(writeTextMock).toHaveBeenCalledTimes(2));
-    const copiedPrompt = writeTextMock.mock.calls[1][0] as string;
+    const copiedPrompt = writeTextMock.mock.calls[0][0] as string;
     expect(copiedPrompt).toContain(`Bearer ${PLAINTEXT}`);
     expect(copiedPrompt).toContain('"universal-mcp-terminal"');
     expect(copiedPrompt).toContain("tools/list");
     expect(await screen.findByText("AI 接入提示词已复制到剪贴板。")).toBeInTheDocument();
   });
 
-  it("已有 Token 时无需新建，直接生成配置和提示词", async () => {
+  it("已有 Token 时默认选中一项，直接生成提示词", async () => {
     const config = makeConfig("umt_existing_token");
     api.getOverview.mockResolvedValue(makeOverview({ tokenCount: 1 }));
     api.listTokens.mockResolvedValue({ items: [makeToken()], total: 1 });
@@ -240,29 +242,24 @@ describe("首页 - 快速开始", () => {
 
     render(<HomePage />);
 
-    const select = await screen.findByLabelText("选择访问 Token");
+    const step2 = scopeToStep("选择访问 Token");
+    const select = await within(step2).findByLabelText("访问 Token");
     expect(select).toHaveValue("t1");
     await waitFor(() =>
       expect(api.getTokenMcpConfig).toHaveBeenCalledWith("t1"),
     );
 
-    const step3 = scopeToStep("选择访问 Token");
-    await waitFor(() =>
-      expect(within(step3).getByTestId("mcp-config")).toHaveTextContent(
-        "umt_existing_token",
-      ),
-    );
-    expect(screen.queryByText(/无法获取密钥/)).not.toBeInTheDocument();
-
-    const step4 = scopeToStep("复制提示词");
-    const prompt = within(step4).getByTestId("ai-prompt");
-    expect(prompt).toHaveTextContent("umt_existing_token");
-    fireEvent.click(within(step4).getByRole("button", { name: "复制接入提示词" }));
+    const step3 = scopeToStep("复制提示词");
+    const copyButton = within(step3).getByRole("button", {
+      name: "复制接入提示词",
+    });
+    await waitFor(() => expect(copyButton).toBeEnabled());
+    fireEvent.click(copyButton);
     await waitFor(() => expect(writeTextMock).toHaveBeenCalledTimes(1));
     expect(writeTextMock.mock.calls[0][0] as string).toContain(config);
   });
 
-  it("切换 Token 时按所选 Token 重新生成配置", async () => {
+  it("切换 Token 时按所选 Token 重新生成提示词", async () => {
     api.getOverview.mockResolvedValue(makeOverview({ tokenCount: 2 }));
     api.listTokens.mockResolvedValue({
       items: [
@@ -277,21 +274,39 @@ describe("首页 - 快速开始", () => {
 
     render(<HomePage />);
 
-    const step3 = scopeToStep("选择访问 Token");
-    const select = await within(step3).findByLabelText("选择访问 Token");
-    await waitFor(() =>
-      expect(within(step3).getByTestId("mcp-config")).toHaveTextContent(
-        "umt_claude_token",
-      ),
-    );
+    const step2 = scopeToStep("选择访问 Token");
+    const select = await within(step2).findByLabelText("访问 Token");
+    const step3 = scopeToStep("复制提示词");
+    const copyButton = within(step3).getByRole("button", {
+      name: "复制接入提示词",
+    });
+    await waitFor(() => expect(copyButton).toBeEnabled());
 
     fireEvent.change(select, { target: { value: "t2" } });
     await waitFor(() =>
-      expect(within(step3).getByTestId("mcp-config")).toHaveTextContent(
-        "umt_cursor_token",
-      ),
+      expect(api.getTokenMcpConfig).toHaveBeenLastCalledWith("t2"),
     );
-    expect(api.getTokenMcpConfig).toHaveBeenLastCalledWith("t2");
+    await waitFor(() => expect(copyButton).toBeEnabled());
+    fireEvent.click(copyButton);
+    await waitFor(() => expect(writeTextMock).toHaveBeenCalledTimes(1));
+    expect(writeTextMock.mock.calls[0][0] as string).toContain(
+      "umt_cursor_token",
+    );
+  });
+
+  it("已有 Token 时选择新建会展开创建表单", async () => {
+    api.getOverview.mockResolvedValue(makeOverview({ tokenCount: 1 }));
+    api.listTokens.mockResolvedValue({ items: [makeToken()], total: 1 });
+
+    render(<HomePage />);
+
+    const step2 = scopeToStep("选择访问 Token");
+    const select = await within(step2).findByLabelText("访问 Token");
+    expect(within(step2).queryByLabelText("Token 名称")).not.toBeInTheDocument();
+
+    fireEvent.change(select, { target: { value: "__new__" } });
+    expect(within(step2).getByLabelText("Token 名称")).toBeInTheDocument();
+    expect(within(step2).getByRole("button", { name: "创建 Token" })).toBeInTheDocument();
   });
 
   it("旧版本 Token 无法生成配置时给出提示且禁止复制", async () => {
@@ -306,13 +321,9 @@ describe("首页 - 快速开始", () => {
 
     expect(await screen.findByText(/创建于旧版本/)).toBeInTheDocument();
 
-    const step3 = scopeToStep("选择访问 Token");
+    const step3 = scopeToStep("复制提示词");
     expect(
-      within(step3).getByRole("button", { name: "复制配置" }),
-    ).toBeDisabled();
-    const step4 = scopeToStep("复制提示词");
-    expect(
-      within(step4).getByRole("button", { name: "复制接入提示词" }),
+      within(step3).getByRole("button", { name: "复制接入提示词" }),
     ).toBeDisabled();
   });
 

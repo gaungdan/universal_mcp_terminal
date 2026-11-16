@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use umt_core::{AuditQuery, PageRequest, UmtError};
 use umt_persistence::{ConnectionFilter, ConnectionRepo, SessionRepo, SettingsRepo, TokenRepo};
-use umt_session_manager::{CommandPolicy, ExecutionMode, SessionLimits};
+use umt_session_manager::{ExecutionMode, SessionLimits};
 
 use crate::ipc::dto::{OverviewDto, SettingsDto};
 use crate::services::audit::to_dto;
@@ -87,12 +87,8 @@ pub async fn update(
         .await?;
     state.set_setting(KEY_LOG_LEVEL, &log_level).await?;
 
-    // 保存成功后立即热更新运行中的 SessionManager：策略与超时都无需重启应用。
-    state.sessions.set_policy(CommandPolicy {
-        mode,
-        require_confirmation_for_high_risk: input.security.require_confirmation_for_high_risk,
-        ..CommandPolicy::default()
-    });
+    // 全局执行模式仅保留为兼容设置，MCP 命令权限以 Token 为准。
+    let _ = mode;
     state.sessions.set_limits(SessionLimits {
         idle_timeout: Duration::from_secs(input.security.session_timeout_secs),
         ..SessionLimits::default()

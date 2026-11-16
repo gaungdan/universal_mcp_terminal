@@ -117,6 +117,35 @@ impl ExecResult {
     }
 }
 
+/// 只读文件请求。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileReadRequest {
+    pub path: String,
+    pub offset: u64,
+    pub max_bytes: usize,
+}
+
+impl FileReadRequest {
+    pub fn new(path: impl Into<String>, offset: u64, max_bytes: usize) -> Self {
+        Self {
+            path: path.into(),
+            offset,
+            max_bytes,
+        }
+    }
+}
+
+/// 只读文件分块。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileChunk {
+    pub path: String,
+    pub offset: u64,
+    pub next_offset: u64,
+    pub size: Option<u64>,
+    pub eof: bool,
+    pub data: Vec<u8>,
+}
+
 /// 一个已建立的终端会话。
 ///
 /// 生命周期由 Session Manager 持有；Provider 必须保证 `close` 之后释放所有资源
@@ -140,6 +169,12 @@ pub trait TerminalSession: Send {
     async fn exec(&mut self, request: ExecRequest) -> Result<ExecResult, SessionError> {
         let _ = request;
         Err(SessionError::UnsupportedCapability(Capability::Exec))
+    }
+
+    /// 读取远程文件的一个分块。不支持 `FileRead` 的协议默认返回 `UnsupportedCapability`。
+    async fn read_file(&mut self, request: FileReadRequest) -> Result<FileChunk, SessionError> {
+        let _ = request;
+        Err(SessionError::UnsupportedCapability(Capability::FileRead))
     }
 
     /// 关闭会话并释放资源。

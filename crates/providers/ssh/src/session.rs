@@ -1,16 +1,19 @@
 //! SSH 终端会话：交互 shell、增量读取、窗口调整、非交互 exec 与资源释放。
 
+use std::io::SeekFrom;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use bytes::Bytes;
 use russh::client;
 use russh::{ChannelMsg, ChannelWriteHalf, Disconnect};
+use russh_sftp::client::SftpSession;
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::sync::mpsc;
 use umt_core::{Capability, CapabilitySet, ExecutionState, SessionId};
 use umt_protocol_api::{
-    ConnectOptions, ExecRequest, ExecResult, OutputChunk, ProviderError, SessionError,
-    TerminalSession,
+    ConnectOptions, ExecRequest, ExecResult, FileChunk, FileReadRequest, OutputChunk,
+    ProviderError, SessionError, TerminalSession,
 };
 
 use crate::host_key::SshHandler;
@@ -199,6 +202,82 @@ impl TerminalSession for SshSession {
             .window_change(cols as u32, rows as u32, 0, 0)
             .await
             .map_err(|err| SessionError::Io(format!("调整 SSH 终端尺寸失败：{err}")))
+    }
+
+    async fn read_file(&mut self, request: FileReadRequest) -> Result<FileChunk, SessionError> {
+        if self.closed {
+            return Err(SessionError::Closed);
+        }
+        if !self.capabilities.contains(Capability::FileRead) {
+            return Err(SessionError::UnsupportedCapability(Capability::FileRead));
+        }
+        let handle = self.handle.as_ref().ok_or(SessionError::Closed)?;
+        let channel = handle
+            .channel_open_session()
+            .await
+            .map_err(|err| SessionError::Io(format!("打开 SFTP 通道失败：{err}")))?;
+        channel
+            .request_subsystem(true, "sftp")
+            .await
+            .map_err(|err| SessionError::Io(format!("启动 SFTP 子系统失败：{err}")))?;
+
+        let sftp = SftpSession::new(channel.into_stream())
+            .await
+            .map_err(|err| SessionError::Io(format!("初始化 SFTP 会话失败：{err}")))?;
+        let mut file = sftp
+            .open(request.path.clone())
+            .await
+            .map_err(|err| SessionError::Io(format!("打开远程文件失败：{err}")))?;
+        let metadata = file
+            .metadata()
+            .await
+            .map_err(|err| SessionError::Io(format!("读取文件元数据失败：{err}")))?;
+        let size = metadata.size;
+        let max_bytes = request.max_bytes.max(1);
+
+        if let Some(size) = size
+            && request.offset > size
+        {
+            file.close()
+                .await
+                .map_err(|err| SessionError::Io(format!("关闭远程文件失败：{err}")))?;
+            return Ok(FileChunk {
+                path: request.path,
+                offset: request.offset,
+                next_offset: request.offset,
+                size: Some(size),
+                eof: true,
+                data: Vec::new(),
+            });
+        }
+
+        file.seek(SeekFrom::Start(request.offset))
+            .await
+            .map_err(|err| SessionError::Io(format!("定位远程文件失败：{err}")))?;
+        let mut data = vec![0u8; max_bytes];
+        let read = file
+            .read(&mut data)
+            .await
+            .map_err(|err| SessionError::Io(format!("读取远程文件失败：{err}")))?;
+        data.truncate(read);
+        let next_offset = request.offset + read as u64;
+        let eof = match size {
+            Some(size) => next_offset >= size,
+            None => read < max_bytes,
+        };
+        file.close()
+            .await
+            .map_err(|err| SessionError::Io(format!("关闭远程文件失败：{err}")))?;
+        let _ = sftp.close().await;
+
+        Ok(FileChunk {
+            path: request.path,
+            offset: request.offset,
+            next_offset,
+            size,
+            eof,
+            data,
+        })
     }
 
     async fn exec(&mut self, request: ExecRequest) -> Result<ExecResult, SessionError> {

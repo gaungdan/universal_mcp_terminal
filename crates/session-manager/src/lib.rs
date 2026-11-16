@@ -6,8 +6,7 @@
 
 pub mod manager;
 pub mod policy;
+pub mod shell;
 
-pub use manager::{OpenSessionRequest, SessionLimits, SessionManager};
-pub use policy::{
-    CommandPolicy, ExecutionMode, PolicyDecision, RiskLevel, classify_risk, is_read_only,
-};
+pub use manager::{OpenSessionRequest, SessionLimits, SessionManager, SessionPurpose};
+pub use policy::{CommandGuard, ExecutionMode, PolicyDecision};

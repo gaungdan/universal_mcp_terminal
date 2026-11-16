@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import {
   createToken,
   deleteToken,
@@ -44,6 +44,11 @@ function formatLastUsed(lastUsedAt?: number | null): string {
   return lastUsedAt === null || lastUsedAt === undefined
     ? "从未使用"
     : formatUnixMillis(lastUsedAt);
+}
+
+function formatPermission(token: TokenDto): string {
+  const base = token.permission === "write_access" ? "WriteAccess" : "ReadOnly";
+  return token.allowInteractive ? `${base} + 交互式` : base;
 }
 
 export default function AccessControlPage() {
@@ -160,11 +165,7 @@ export default function AccessControlPage() {
         </button>
       </header>
 
-      <div
-        className={`access-control__layout${
-          selectedToken ? " access-control__layout--with-detail" : ""
-        }`}
-      >
+      <div className="access-control__layout">
         <div className="access-control__main">
           <SectionCard
             title="Token 列表"
@@ -245,6 +246,7 @@ export default function AccessControlPage() {
                       <th scope="col">名称</th>
                       <th scope="col">Token</th>
                       <th scope="col">状态</th>
+                      <th scope="col">权限</th>
                       <th scope="col">有效期</th>
                       <th scope="col">创建时间</th>
                       <th scope="col">最后使用</th>
@@ -255,97 +257,122 @@ export default function AccessControlPage() {
                     {tokens.map((token) => {
                       const selected = selectedToken?.id === token.id;
                       return (
-                        <tr
-                          key={token.id}
-                          className={`access-control__row${
-                            selected ? " access-control__row--selected" : ""
-                          }`}
-                          onClick={() => setSelectedToken(token)}
-                        >
-                          <td>
-                            <div className="access-control__name">
-                              <button
-                                type="button"
-                                className="link-button"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  setSelectedToken(token);
-                                }}
-                                aria-expanded={selected}
-                              >
-                                {token.name}
-                              </button>
-                              {token.description ? (
-                                <span className="access-control__subtext">
-                                  {token.description}
-                                </span>
-                              ) : null}
-                            </div>
-                          </td>
-                          <td>
-                            <code className="access-control__masked">
-                              {maskToken(token.prefix)}
-                            </code>
-                          </td>
-                          <td>
-                            <StatusBadge status={token.status} />
-                          </td>
-                          <td>{formatExpiry(token.expiresAt)}</td>
-                          <td>{formatUnixMillis(token.createdAt)}</td>
-                          <td>{formatLastUsed(token.lastUsedAt)}</td>
-                          <td
-                            className="access-control__actions"
-                            onClick={(event) => event.stopPropagation()}
+                        <Fragment key={token.id}>
+                          <tr
+                            className={`access-control__row${
+                              selected ? " access-control__row--selected" : ""
+                            }`}
+                            onClick={() =>
+                              setSelectedToken(selected ? null : token)
+                            }
                           >
-                            {token.status === "active" ? (
-                              <button
-                                type="button"
-                                className="btn btn--ghost btn--small"
-                                onClick={() => void handleChangeStatus(token, "disabled")}
-                                disabled={actionBusy}
-                                aria-label={`禁用 ${token.name}`}
+                            <td>
+                              <div className="access-control__name">
+                                <button
+                                  type="button"
+                                  className="link-button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setSelectedToken(token);
+                                  }}
+                                  aria-expanded={selected}
+                                >
+                                  {token.name}
+                                </button>
+                                {token.description ? (
+                                  <span className="access-control__subtext">
+                                    {token.description}
+                                  </span>
+                                ) : null}
+                              </div>
+                            </td>
+                            <td>
+                              <code className="access-control__masked">
+                                {maskToken(token.prefix)}
+                              </code>
+                            </td>
+                            <td>
+                              <StatusBadge status={token.status} />
+                            </td>
+                            <td>
+                              <span
+                                className={`permission-tag permission-tag--${token.permission}`}
                               >
-                                禁用
-                              </button>
-                            ) : null}
-                            {token.status === "disabled" ? (
-                              <button
-                                type="button"
-                                className="btn btn--ghost btn--small"
-                                onClick={() => void handleChangeStatus(token, "active")}
-                                disabled={actionBusy}
-                                aria-label={`启用 ${token.name}`}
-                              >
-                                启用
-                              </button>
-                            ) : null}
-                            {token.status !== "revoked" ? (
-                              <button
-                                type="button"
-                                className="btn btn--ghost btn--small"
-                                onClick={() => setPendingAction({ kind: "revoke", token })}
-                                disabled={actionBusy}
-                                aria-label={`撤销 ${token.name}`}
-                              >
-                                撤销
-                              </button>
-                            ) : null}
-                            <button
-                              type="button"
-                              className="btn btn--ghost btn--small access-control__danger"
-                              onClick={() => setPendingAction({ kind: "delete", token })}
-                              disabled={token.status === "active" || actionBusy}
-                              title={
-                                token.status === "active"
-                                  ? "启用中的 Token 不能删除，请先禁用或撤销"
-                                  : undefined
-                              }
-                              aria-label={`删除 ${token.name}`}
+                                {formatPermission(token)}
+                              </span>
+                            </td>
+                            <td>{formatExpiry(token.expiresAt)}</td>
+                            <td>{formatUnixMillis(token.createdAt)}</td>
+                            <td>{formatLastUsed(token.lastUsedAt)}</td>
+                            <td
+                              className="access-control__actions"
+                              onClick={(event) => event.stopPropagation()}
                             >
-                              删除
-                            </button>
-                          </td>
-                        </tr>
+                              {token.status === "active" ? (
+                                <button
+                                  type="button"
+                                  className="btn btn--ghost btn--small"
+                                  onClick={() => void handleChangeStatus(token, "disabled")}
+                                  disabled={actionBusy}
+                                  aria-label={`禁用 ${token.name}`}
+                                >
+                                  禁用
+                                </button>
+                              ) : null}
+                              {token.status === "disabled" ? (
+                                <button
+                                  type="button"
+                                  className="btn btn--ghost btn--small"
+                                  onClick={() => void handleChangeStatus(token, "active")}
+                                  disabled={actionBusy}
+                                  aria-label={`启用 ${token.name}`}
+                                >
+                                  启用
+                                </button>
+                              ) : null}
+                              {token.status !== "revoked" ? (
+                                <button
+                                  type="button"
+                                  className="btn btn--ghost btn--small"
+                                  onClick={() => setPendingAction({ kind: "revoke", token })}
+                                  disabled={actionBusy}
+                                  aria-label={`撤销 ${token.name}`}
+                                >
+                                  撤销
+                                </button>
+                              ) : null}
+                              <button
+                                type="button"
+                                className="btn btn--ghost btn--small access-control__danger"
+                                onClick={() => setPendingAction({ kind: "delete", token })}
+                                disabled={token.status === "active" || actionBusy}
+                                title={
+                                  token.status === "active"
+                                    ? "启用中的 Token 不能删除，请先禁用或撤销"
+                                    : undefined
+                                }
+                                aria-label={`删除 ${token.name}`}
+                              >
+                                删除
+                              </button>
+                            </td>
+                          </tr>
+                          {selected ? (
+                            <tr className="access-control__detail-row">
+                              <td colSpan={8}>
+                                <TokenDetailPanel
+                                  key={token.id}
+                                  token={token}
+                                  onClose={() => setSelectedToken(null)}
+                                  onUpdated={(updated) => {
+                                    syncToken(updated);
+                                    tokensQuery.reload();
+                                  }}
+                                />
+                              </td>
+                            </tr>
+                          ) : null}
+                        </Fragment>
                       );
                     })}
                   </tbody>
@@ -354,14 +381,6 @@ export default function AccessControlPage() {
             ) : null}
           </SectionCard>
         </div>
-
-        {selectedToken ? (
-          <TokenDetailPanel
-            key={selectedToken.id}
-            token={selectedToken}
-            onClose={() => setSelectedToken(null)}
-          />
-        ) : null}
       </div>
 
       {createOpen ? (

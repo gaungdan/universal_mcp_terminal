@@ -4,7 +4,9 @@ use umt_core::{
     Connection, ConnectionId, Page, PageRequest, Token, TokenContext, TokenId, TokenStatus,
     UmtError, UnixMillis,
 };
-use umt_persistence::{ConnectionRepo, GrantRepo, GrantView, SecretBlob, TokenRecord, TokenRepo};
+use umt_persistence::{
+    ConnectionFilter, ConnectionRepo, GrantRepo, GrantView, SecretBlob, TokenRecord, TokenRepo,
+};
 use umt_security::{EncryptedSecret, SecretCipher, TokenService};
 
 /// 创建 Token 的结果：明文只在这里出现一次。
@@ -91,6 +93,26 @@ impl AccessControl {
         description: Option<String>,
         expires_at: Option<UnixMillis>,
     ) -> Result<CreatedToken, UmtError> {
+        self.create_token_with_permissions(
+            name,
+            description,
+            expires_at,
+            umt_core::TokenPermission::ReadOnly,
+            false,
+        )
+        .await
+    }
+
+    /// 创建 Token，并显式指定权限与交互式终端开关。
+    pub async fn create_token_with_permissions(
+        &self,
+        name: &str,
+        description: Option<String>,
+        expires_at: Option<UnixMillis>,
+        permission: umt_core::TokenPermission,
+        allow_interactive: bool,
+    ) -> Result<CreatedToken, UmtError> {
+        self.validate_permissions(permission, allow_interactive)?;
         let name = name.trim();
         if name.is_empty() {
             return Err(UmtError::Validation("Token 名称不能为空".into()));
@@ -108,6 +130,8 @@ impl AccessControl {
             description,
             prefix: hash.prefix,
             status: TokenStatus::Active,
+            permission,
+            allow_interactive,
             expires_at,
             created_at: UnixMillis::now(),
             last_used_at: None,
@@ -134,10 +158,69 @@ impl AccessControl {
                 .await?;
         }
 
+        // 新 Token 默认授权全部现有连接，创建后可在详情中按需关闭。
+        self.grant_all_connections(token.id).await?;
+
         Ok(CreatedToken {
             token,
             plaintext: secret.expose().to_string(),
         })
+    }
+
+    fn validate_permissions(
+        &self,
+        permission: umt_core::TokenPermission,
+        allow_interactive: bool,
+    ) -> Result<(), UmtError> {
+        if permission == umt_core::TokenPermission::ReadOnly && allow_interactive {
+            return Err(UmtError::Validation(
+                "ReadOnly Token 不允许开启交互式终端，请改用 WriteAccess".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// 更新 Token 权限与交互式终端开关。
+    pub async fn update_token_permissions(
+        &self,
+        id: TokenId,
+        permission: umt_core::TokenPermission,
+        allow_interactive: bool,
+    ) -> Result<Token, UmtError> {
+        self.validate_permissions(permission, allow_interactive)?;
+        let current = self.get_token(id).await?;
+        if current.status == TokenStatus::Revoked {
+            return Err(UmtError::Conflict("Token 已撤销，不能再修改".into()));
+        }
+        self.tokens
+            .set_permissions(id, permission, allow_interactive)
+            .await?;
+        self.get_token(id).await
+    }
+
+    /// 为 Token 批量写入「允许」授权，分页遍历以免连接数量超过单页上限。
+    async fn grant_all_connections(&self, token_id: TokenId) -> Result<(), UmtError> {
+        let mut offset = 0u32;
+        loop {
+            let page = self
+                .connections
+                .list(&ConnectionFilter {
+                    page: PageRequest::new(offset, PageRequest::MAX_LIMIT),
+                    ..Default::default()
+                })
+                .await?;
+            if page.items.is_empty() {
+                break;
+            }
+            for connection in &page.items {
+                self.grants.set(token_id, connection.id, true).await?;
+            }
+            offset += page.items.len() as u32;
+            if u64::from(offset) >= page.total {
+                break;
+            }
+        }
+        Ok(())
     }
 
     /// 读取 Token 明文的加密副本，仅供本地生成 MCP 配置使用。
@@ -313,6 +396,8 @@ impl AccessControl {
         self.tokens.touch_last_used(record.token.id, now).await?;
         Ok(
             TokenContext::new(record.token.id, record.token.name.clone())
+                .with_permission(record.token.permission)
+                .with_interactive(record.token.allow_interactive)
                 .with_client_info(client_info),
         )
     }
@@ -490,6 +575,29 @@ mod tests {
             .await
             .expect("读取失败");
         assert_eq!(secret.as_deref(), Some(created.plaintext.as_str()));
+    }
+
+    #[tokio::test]
+    async fn new_token_grants_all_connections() {
+        let f = fixture().await;
+        let prod = insert_connection(&f.repos, "prod", true).await;
+        let stage = insert_connection(&f.repos, "stage", false).await;
+
+        let created = f
+            .service
+            .create_token("auto", None, None)
+            .await
+            .expect("创建失败");
+        let grants = f
+            .service
+            .list_grants(created.token.id)
+            .await
+            .expect("读取授权失败");
+
+        assert_eq!(grants.len(), 2);
+        assert!(grants.iter().all(|grant| grant.allowed));
+        assert!(grants.iter().any(|grant| grant.connection.id == prod));
+        assert!(grants.iter().any(|grant| grant.connection.id == stage));
     }
 
     #[tokio::test]

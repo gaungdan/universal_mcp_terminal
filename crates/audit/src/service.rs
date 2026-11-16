@@ -134,6 +134,8 @@ mod tests {
             connection_id: None,
             kind: AuditKind::CommandExecuted,
             outcome: AuditOutcome::Allowed,
+            tool_name: None,
+            permission: None,
             command: Some("mysql -u root --password=topsecret".into()),
             working_dir: None,
             started_at: UnixMillis::now(),

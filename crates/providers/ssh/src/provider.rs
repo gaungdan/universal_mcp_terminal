@@ -38,6 +38,7 @@ impl SshProvider {
                     Capability::Exec,
                     Capability::InteractiveTerminal,
                     Capability::TerminalResize,
+                    Capability::FileRead,
                 ]),
             },
             schema: build_schema(),

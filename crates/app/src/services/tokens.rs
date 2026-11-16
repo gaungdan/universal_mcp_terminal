@@ -27,7 +27,13 @@ pub async fn create(
 ) -> Result<CreatedTokenDto, UmtError> {
     let created = state
         .access
-        .create_token(&input.name, input.description, input.expires_at)
+        .create_token_with_permissions(
+            &input.name,
+            input.description,
+            input.expires_at,
+            input.permission,
+            input.allow_interactive,
+        )
         .await?;
 
     record_event(
@@ -37,7 +43,11 @@ pub async fn create(
         Some(created.token.id),
         None,
         None,
-        None,
+        Some(format!(
+            "permission={};allow_interactive={}",
+            created.token.permission.as_str(),
+            created.token.allow_interactive
+        )),
     )
     .await;
 
@@ -49,9 +59,13 @@ pub async fn create(
 
 pub async fn update(state: &AppState, input: UpdateTokenInput) -> Result<TokenDto, UmtError> {
     let token_id = crate::services::parse_id::<TokenId>(&input.id, "Token")?;
-    let token = state
+    state
         .access
         .update_token(token_id, &input.name, input.description, input.expires_at)
+        .await?;
+    let token = state
+        .access
+        .update_token_permissions(token_id, input.permission, input.allow_interactive)
         .await?;
     Ok(TokenDto::from(token))
 }

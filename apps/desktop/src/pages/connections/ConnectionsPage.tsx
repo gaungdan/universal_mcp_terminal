@@ -22,6 +22,7 @@ import { formatUnixMillis, toUserMessage } from "../../lib/errors";
 import { useAsync } from "../../lib/useAsync";
 import ConnectionDetailPanel from "./ConnectionDetailPanel";
 import ConnectionFormDialog from "./ConnectionFormDialog";
+import "./connections.css";
 
 const PAGE_SIZE = 20;
 const SEARCH_DEBOUNCE_MS = 300;
@@ -46,23 +47,6 @@ const noticeStyle = {
   backgroundColor: "var(--color-accent-soft)",
   borderRadius: "var(--radius)",
 };
-
-const cellStyle = {
-  padding: "10px",
-  borderBottom: "1px solid var(--color-border)",
-  verticalAlign: "middle",
-  fontSize: 13,
-};
-
-const headCellStyle = {
-  padding: "8px 10px",
-  fontSize: 12,
-  fontWeight: 600,
-  color: "var(--color-muted)",
-  textAlign: "left",
-  whiteSpace: "nowrap",
-  borderBottom: "1px solid var(--color-border)",
-} as const;
 
 const controlStyle = { width: "auto", minWidth: 120 };
 
@@ -269,11 +253,13 @@ export default function ConnectionsPage() {
     ) ?? null;
 
   return (
-    <section className="page">
-      <h1>连接管理</h1>
-      <p style={{ marginBottom: 20 }}>
-        创建并维护 MCP 服务连接。配置项由协议动态提供，测试通过后再授权给 Token 使用。
-      </p>
+    <section className="page connections-page">
+      <header className="connections-page__header">
+        <h1>连接管理</h1>
+        <p>
+          创建并维护 MCP 服务连接。配置项由协议动态提供，测试通过后再授权给 Token 使用。
+        </p>
+      </header>
 
       <Toolbar
         actions={
@@ -299,11 +285,10 @@ export default function ConnectionsPage() {
         <input
           type="search"
           aria-label="搜索连接"
-          className="form-field__control"
+          className="form-field__control connections-filters__search"
           placeholder="搜索名称、描述或标签"
           value={searchInput}
           onChange={(event) => setSearchInput(event.target.value)}
-          style={{ width: 240 }}
         />
         <select
           aria-label="按协议筛选"
@@ -355,14 +340,11 @@ export default function ConnectionsPage() {
       ) : null}
 
       <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          alignItems: "flex-start",
-          gap: 16,
-        }}
+        className={`connections-layout${
+          selectedId ? " connections-layout--with-detail" : ""
+        }`}
       >
-        <div style={{ flex: "3 1 560px", minWidth: 0 }}>
+        <div className="connections-layout__main">
           <SectionCard
             title="连接列表"
             description="列表仅展示连接的公共信息，凭据不会在此显示。"
@@ -412,13 +394,13 @@ export default function ConnectionsPage() {
 
             {items.length > 0 ? (
               <>
-                <div style={{ overflowX: "auto" }} aria-busy={list.loading}>
-                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <div className="connections-table-wrap" aria-busy={list.loading}>
+                  <table className="connections-table">
                     <thead>
                       <tr>
                         {["名称", "协议", "能力", "启用", "更新时间", "操作"].map(
                           (label) => (
-                            <th key={label} scope="col" style={headCellStyle}>
+                            <th key={label} scope="col">
                               {label}
                             </th>
                           ),
@@ -428,46 +410,32 @@ export default function ConnectionsPage() {
                     <tbody>
                       {items.map((connection) => (
                         <tr key={connection.id}>
-                          <td style={cellStyle}>
+                          <td>
                             <button
                               type="button"
+                              className="connections-table__name"
                               onClick={() => handleSelect(connection.id)}
-                              style={{
-                                padding: 0,
-                                font: "inherit",
-                                color: "var(--color-accent)",
-                                textAlign: "left",
-                                background: "none",
-                                border: "none",
-                                cursor: "pointer",
-                              }}
                             >
                               {connection.name}
                             </button>
                             {connection.description ? (
-                              <div style={{ fontSize: 12, color: "var(--color-muted)" }}>
+                              <div className="connections-table__description">
                                 {connection.description}
                               </div>
                             ) : null}
                           </td>
-                          <td style={cellStyle}>{connection.protocolDisplayName}</td>
-                          <td style={cellStyle}>
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                              {connection.capabilities.length === 0 ? (
-                                <span style={{ color: "var(--color-muted)" }}>—</span>
-                              ) : (
-                                connection.capabilities.map((capability) => (
-                                  <span
-                                    key={capability}
-                                    className="status-badge status-badge--neutral"
-                                  >
-                                    {capability}
-                                  </span>
-                                ))
-                              )}
+                          <td>{connection.protocolDisplayName}</td>
+                          <td>
+                            <div
+                              className="connections-table__capabilities"
+                              title={connection.capabilities.join("、")}
+                            >
+                              {connection.capabilities.length === 0
+                                ? "—"
+                                : connection.capabilities.join("、")}
                             </div>
                           </td>
-                          <td style={cellStyle}>
+                          <td>
                             <input
                               type="checkbox"
                               role="switch"
@@ -477,18 +445,14 @@ export default function ConnectionsPage() {
                               onChange={(event) =>
                                 void handleToggleEnabled(connection, event.target.checked)
                               }
-                              style={{
-                                width: 16,
-                                height: 16,
-                                accentColor: "var(--color-accent)",
-                              }}
+                              className="connections-table__switch"
                             />
                           </td>
-                          <td style={{ ...cellStyle, whiteSpace: "nowrap", color: "var(--color-muted)" }}>
+                          <td className="connections-table__updated">
                             {formatUnixMillis(connection.updatedAt)}
                           </td>
-                          <td style={cellStyle}>
-                            <div style={{ display: "flex", gap: 6 }}>
+                          <td>
+                            <div className="connections-table__actions">
                               <button
                                 type="button"
                                 className="btn btn--ghost btn--small"
@@ -511,22 +475,11 @@ export default function ConnectionsPage() {
                   </table>
                 </div>
 
-                <div
-                  style={{
-                    display: "flex",
-                    flexWrap: "wrap",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 12,
-                    marginTop: 14,
-                    fontSize: 12,
-                    color: "var(--color-muted)",
-                  }}
-                >
+                <div className="connections-pagination">
                   <span>
                     第 {rangeStart}-{rangeEnd} 条，共 {total} 条
                   </span>
-                  <div style={{ display: "flex", gap: 8 }}>
+                  <div className="connections-pagination__actions">
                     <button
                       type="button"
                       className="btn btn--ghost btn--small"
@@ -551,7 +504,7 @@ export default function ConnectionsPage() {
         </div>
 
         {selectedId ? (
-          <div style={{ flex: "1 1 320px", minWidth: 280 }}>
+          <div className="connections-layout__aside">
             <ConnectionDetailPanel
               detail={detail.data}
               loading={detail.loading}

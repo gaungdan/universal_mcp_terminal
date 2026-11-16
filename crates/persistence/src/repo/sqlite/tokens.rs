@@ -3,11 +3,11 @@
 use async_trait::async_trait;
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteRow;
-use umt_core::{Page, PageRequest, Token, TokenId, TokenStatus, UnixMillis};
+use umt_core::{Page, PageRequest, Token, TokenId, TokenPermission, TokenStatus, UnixMillis};
 
 use super::support::{
-    RowExt, backend, count_to_u64, is_foreign_key_violation, is_unique_violation, narrow, parse_id,
-    token_status_from_str,
+    RowExt, backend, bool_from_int, count_to_u64, is_foreign_key_violation, is_unique_violation,
+    narrow, parse_id, token_permission_from_str, token_permission_to_str, token_status_from_str,
 };
 use crate::error::PersistenceError;
 use crate::models::{SecretBlob, TokenRecord};
@@ -27,7 +27,7 @@ impl SqliteTokenRepo {
     async fn fetch_record(&self, id: TokenId) -> Result<Option<TokenRecord>, PersistenceError> {
         let row = sqlx::query(
             "SELECT id, name, description, prefix, hmac, expires_at, created_at, last_used_at, \
-             status FROM tokens WHERE id = ?",
+             status, permission, allow_interactive FROM tokens WHERE id = ?",
         )
         .bind(id.to_string())
         .fetch_optional(&self.pool)
@@ -44,6 +44,8 @@ fn token_from_row(row: &SqliteRow) -> Result<Token, PersistenceError> {
         description: row.opt_text("description")?,
         prefix: row.text("prefix")?,
         status: token_status_from_str(&row.text("status")?)?,
+        permission: token_permission_from_str(&row.text("permission")?)?,
+        allow_interactive: bool_from_int(row.int("allow_interactive")?),
         expires_at: row.opt_int("expires_at")?.map(UnixMillis),
         created_at: UnixMillis(row.int("created_at")?),
         last_used_at: row.opt_int("last_used_at")?.map(UnixMillis),
@@ -82,8 +84,9 @@ impl TokenRepo for SqliteTokenRepo {
 
         let result = sqlx::query(
             "INSERT INTO tokens \
-             (id, name, description, prefix, hmac, expires_at, created_at, last_used_at, status) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             (id, name, description, prefix, hmac, expires_at, created_at, last_used_at, status, \
+              permission, allow_interactive) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(id.as_str())
         .bind(record.token.name.as_str())
@@ -94,6 +97,8 @@ impl TokenRepo for SqliteTokenRepo {
         .bind(record.token.created_at.0)
         .bind(record.token.last_used_at.map(|at| at.0))
         .bind(record.token.status.as_str())
+        .bind(token_permission_to_str(record.token.permission))
+        .bind(i64::from(record.token.allow_interactive))
         .execute(&mut *tx)
         .await;
 
@@ -126,7 +131,8 @@ impl TokenRepo for SqliteTokenRepo {
         let page = page.normalized();
         let rows = sqlx::query(
             "SELECT id, name, description, prefix, hmac, expires_at, created_at, last_used_at, \
-             status FROM tokens ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+             status, permission, allow_interactive FROM tokens \
+             ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
         )
         .bind(page.limit)
         .bind(page.offset)
@@ -175,6 +181,26 @@ impl TokenRepo for SqliteTokenRepo {
         Ok(())
     }
 
+    async fn set_permissions(
+        &self,
+        id: TokenId,
+        permission: TokenPermission,
+        allow_interactive: bool,
+    ) -> Result<(), PersistenceError> {
+        let done =
+            sqlx::query("UPDATE tokens SET permission = ?, allow_interactive = ? WHERE id = ?")
+                .bind(token_permission_to_str(permission))
+                .bind(i64::from(allow_interactive))
+                .bind(id.to_string())
+                .execute(&self.pool)
+                .await
+                .map_err(backend)?;
+        if done.rows_affected() == 0 {
+            return Err(PersistenceError::not_found("Token", id.to_string()));
+        }
+        Ok(())
+    }
+
     async fn touch_last_used(&self, id: TokenId, at: UnixMillis) -> Result<(), PersistenceError> {
         let done = sqlx::query("UPDATE tokens SET last_used_at = ? WHERE id = ?")
             .bind(at.0)
@@ -191,7 +217,7 @@ impl TokenRepo for SqliteTokenRepo {
     async fn find_by_prefix(&self, prefix: &str) -> Result<Option<TokenRecord>, PersistenceError> {
         let row = sqlx::query(
             "SELECT id, name, description, prefix, hmac, expires_at, created_at, last_used_at, \
-             status FROM tokens WHERE prefix = ?",
+             status, permission, allow_interactive FROM tokens WHERE prefix = ?",
         )
         .bind(prefix)
         .fetch_optional(&self.pool)

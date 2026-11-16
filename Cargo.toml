@@ -80,6 +80,7 @@ keyring = { version = "4.2.0", features = ["v1"] }
 # ---- 协议 ----
 # 使用 ring 作为密码学后端：本机 GNU 工具链下 aws-lc-sys 会因 MinGW 缺少 nanosleep64 链接失败。
 russh = { version = "0.65.1", default-features = false, features = ["ring", "rsa", "flate2"] }
+russh-sftp = "3.0.1"
 
 # ---- MCP ----
 rmcp = { version = "3.9.0", features = [

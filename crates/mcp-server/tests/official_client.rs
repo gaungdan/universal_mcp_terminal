@@ -20,7 +20,9 @@ use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig
 use serde_json::{Value, json};
 use umt_access_control::AccessControl;
 use umt_audit::AuditService;
-use umt_core::{Connection, ConnectionConfig, ConnectionId, TokenContext, UmtError, UnixMillis};
+use umt_core::{
+    Connection, ConnectionConfig, ConnectionId, TokenContext, TokenPermission, UmtError, UnixMillis,
+};
 use umt_mcp_server::{ConnectionConfigSource, McpDeps, McpServer, McpServerConfig, TOOL_NAMES};
 use umt_persistence::{ConnectionRepo, InMemoryRepos};
 use umt_protocol_api::MockProvider;
@@ -125,7 +127,7 @@ impl Harness {
     async fn token(&self, name: &str) -> (TokenContext, String) {
         let created = self
             .access
-            .create_token(name, None, None)
+            .create_token_with_permissions(name, None, None, TokenPermission::WriteAccess, true)
             .await
             .expect("创建 Token 失败");
         let context = self
@@ -246,7 +248,12 @@ async fn official_client_completes_handshake_and_tool_calls() {
     let mut expected = TOOL_NAMES.to_vec();
     names.sort_unstable();
     expected.sort_unstable();
-    assert_eq!(names.len(), 9, "官方客户端应看到 9 个工具：{names:?}");
+    assert_eq!(
+        names.len(),
+        TOOL_NAMES.len(),
+        "官方客户端应看到 {} 个工具：{names:?}",
+        TOOL_NAMES.len()
+    );
     assert_eq!(names, expected, "工具名称集合与需求不一致");
 
     // 2) list_connections：能看到被授权的连接。

@@ -14,6 +14,7 @@
 
 mod deps;
 mod handler;
+mod permission;
 mod service;
 mod tools;
 

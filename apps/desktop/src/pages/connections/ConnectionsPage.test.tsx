@@ -135,7 +135,7 @@ describe("ConnectionsPage", () => {
     expect(within(table).getByText("SSH")).toBeInTheDocument();
     expect(within(table).getByText("Telnet")).toBeInTheDocument();
     expect(screen.getByText("主要生产环境")).toBeInTheDocument();
-    expect(screen.getByText("shell")).toBeInTheDocument();
+    expect(screen.getByText("exec、shell")).toBeInTheDocument();
     expect(screen.getByText(/第 1-2 条，共 2 条/)).toBeInTheDocument();
 
     expect(api.listConnections).toHaveBeenCalledWith({

@@ -79,6 +79,17 @@ pub(super) fn session_state_to_str(state: SessionState) -> &'static str {
     }
 }
 
+pub(super) fn token_permission_to_str(permission: umt_core::TokenPermission) -> &'static str {
+    permission.as_str()
+}
+
+pub(super) fn token_permission_from_str(
+    raw: &str,
+) -> Result<umt_core::TokenPermission, PersistenceError> {
+    raw.parse::<umt_core::TokenPermission>()
+        .map_err(PersistenceError::backend)
+}
+
 pub(super) fn session_state_from_str(raw: &str) -> Result<SessionState, PersistenceError> {
     match raw {
         "connecting" => Ok(SessionState::Connecting),
@@ -123,6 +134,7 @@ pub(super) fn audit_kind_to_str(kind: AuditKind) -> &'static str {
         AuditKind::SessionOpened => "session_opened",
         AuditKind::SessionClosed => "session_closed",
         AuditKind::CommandExecuted => "command_executed",
+        AuditKind::FileRead => "file_read",
         AuditKind::InputSent => "input_sent",
         AuditKind::OutputRead => "output_read",
         AuditKind::PermissionDenied => "permission_denied",
@@ -144,6 +156,7 @@ pub(super) fn audit_kind_from_str(raw: &str) -> Result<AuditKind, PersistenceErr
         "session_opened" => Ok(AuditKind::SessionOpened),
         "session_closed" => Ok(AuditKind::SessionClosed),
         "command_executed" => Ok(AuditKind::CommandExecuted),
+        "file_read" => Ok(AuditKind::FileRead),
         "input_sent" => Ok(AuditKind::InputSent),
         "output_read" => Ok(AuditKind::OutputRead),
         "permission_denied" => Ok(AuditKind::PermissionDenied),

@@ -64,35 +64,19 @@
   gap: 12px;
 }
 
-.audit-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 16px;
-  align-items: start;
-}
-
-.audit-layout--with-detail {
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
-}
-
-@media (max-width: 1100px) {
-  .audit-layout--with-detail {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
 .audit-table-wrap {
   overflow-x: auto;
 }
 
 .audit-table {
   width: 100%;
+  table-layout: fixed;
   font-size: 13px;
   border-collapse: collapse;
 }
 
 .audit-table th {
-  padding: 8px 10px;
+  padding: 8px 6px;
   font-weight: 600;
   color: var(--color-muted);
   text-align: left;
@@ -100,10 +84,35 @@
   border-bottom: 1px solid var(--color-border);
 }
 
+.audit-table th:nth-child(1) {
+  width: 150px;
+}
+
+.audit-table th:nth-child(2) {
+  width: 120px;
+}
+
+.audit-table th:nth-child(3) {
+  width: 72px;
+}
+
+.audit-table th:nth-child(4),
+.audit-table th:nth-child(5),
+.audit-table th:nth-child(6) {
+  width: 90px;
+}
+
 .audit-table td {
-  padding: 9px 10px;
+  padding: 8px 6px;
   vertical-align: middle;
   border-bottom: 1px solid var(--color-border);
+}
+
+.audit-table td:nth-child(2),
+.audit-table td:nth-child(4),
+.audit-table td:nth-child(5),
+.audit-table td:nth-child(6) {
+  white-space: nowrap;
 }
 
 .audit-row {
@@ -123,16 +132,30 @@
   background-color: var(--color-accent-soft);
 }
 
-.audit-row--static {
-  cursor: default;
+.audit-detail-row > td {
+  padding: 0;
+  background-color: #f7faf7;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.audit-detail {
+  display: flex;
+  flex-direction: column;
+}
+
+.session-detail__mono {
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  word-break: break-all;
 }
 
 .audit-cell--nowrap {
   white-space: nowrap;
 }
 
-.audit-cell--command {
-  max-width: 280px;
+.audit-cell__command {
+  display: block;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -216,10 +239,6 @@
   background-color: var(--color-danger-soft);
 }
 
-.audit-detail {
-  align-self: start;
-}
-
 .audit-detail__header {
   display: flex;
   align-items: flex-start;
@@ -273,7 +292,7 @@
 
 .audit-meta {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 10px 14px;
   margin: 0;
 }

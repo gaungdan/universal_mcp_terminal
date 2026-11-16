@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import type { SessionDto, SessionFilterDto } from "../../api/types";
 import { listSessionHistory } from "../../api/client";
 import EmptyState from "../../components/EmptyState";
@@ -8,6 +8,7 @@ import { formatUnixMillis } from "../../lib/errors";
 import { useAsync } from "../../lib/useAsync";
 import { abbreviateId, describeAuditError, isSameQuery } from "./audit";
 import Pager from "./Pager";
+import SessionDetail from "./SessionDetail";
 
 const SESSION_PAGE_SIZE = 50;
 
@@ -34,6 +35,7 @@ export default function SessionHistory() {
   const [draft, setDraft] = useState<SessionDraft>(EMPTY_SESSION_FILTER);
   const [applied, setApplied] = useState<SessionDraft>(EMPTY_SESSION_FILTER);
   const [page, setPage] = useState(0);
+  const [selected, setSelected] = useState<SessionDto | null>(null);
 
   const query = useMemo(() => buildSessionQuery(applied, page), [applied, page]);
   const { data, loading, error, reload } = useAsync(
@@ -48,6 +50,7 @@ export default function SessionHistory() {
     const nextQuery = buildSessionQuery(draft, 0);
     setApplied(draft);
     setPage(0);
+    setSelected(null);
     if (isSameQuery(nextQuery, query)) {
       reload();
     }
@@ -59,9 +62,15 @@ export default function SessionHistory() {
     setDraft(empty);
     setApplied(empty);
     setPage(0);
+    setSelected(null);
     if (isSameQuery(nextQuery, query)) {
       reload();
     }
+  };
+
+  const handlePageChange = (nextPage: number) => {
+    setPage(nextPage);
+    setSelected(null);
   };
 
   let content;
@@ -97,25 +106,53 @@ export default function SessionHistory() {
               </tr>
             </thead>
             <tbody>
-              {sessions.map((session) => (
-                <tr key={session.id} className="audit-row audit-row--static">
-                  <td title={session.id}>{abbreviateId(session.id, 16)}</td>
-                  <td>
-                    <StatusBadge status={session.state} />
-                  </td>
-                  <td title={session.tokenId}>{abbreviateId(session.tokenId)}</td>
-                  <td title={session.connectionId}>
-                    {abbreviateId(session.connectionId)}
-                  </td>
-                  <td className="audit-cell--nowrap">
-                    {formatUnixMillis(session.startedAt)}
-                  </td>
-                  <td className="audit-cell--nowrap">
-                    {formatUnixMillis(session.endedAt)}
-                  </td>
-                  <td className="audit-cell--reason">{session.closeReason ?? "—"}</td>
-                </tr>
-              ))}
+              {sessions.map((session) => {
+                const isSelected = selected?.id === session.id;
+                const toggle = () => setSelected(isSelected ? null : session);
+                return (
+                  <Fragment key={session.id}>
+                    <tr
+                      className={`audit-row${isSelected ? " audit-row--selected" : ""}`}
+                      tabIndex={0}
+                      onClick={toggle}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          toggle();
+                        }
+                      }}
+                    >
+                      <td title={session.id}>{abbreviateId(session.id, 16)}</td>
+                      <td>
+                        <StatusBadge status={session.state} />
+                      </td>
+                      <td title={session.tokenId}>{abbreviateId(session.tokenId)}</td>
+                      <td title={session.connectionId}>
+                        {abbreviateId(session.connectionId)}
+                      </td>
+                      <td className="audit-cell--nowrap">
+                        {formatUnixMillis(session.startedAt)}
+                      </td>
+                      <td className="audit-cell--nowrap">
+                        {formatUnixMillis(session.endedAt)}
+                      </td>
+                      <td className="audit-cell--reason">
+                        {session.closeReason ?? "—"}
+                      </td>
+                    </tr>
+                    {isSelected ? (
+                      <tr className="audit-detail-row">
+                        <td colSpan={7}>
+                          <SessionDetail
+                            session={session}
+                            onClose={() => setSelected(null)}
+                          />
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -123,7 +160,7 @@ export default function SessionHistory() {
           page={page}
           total={total}
           pageSize={SESSION_PAGE_SIZE}
-          onPageChange={setPage}
+          onPageChange={handlePageChange}
         />
       </>
     );

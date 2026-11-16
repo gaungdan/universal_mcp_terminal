@@ -19,6 +19,8 @@ pub enum Capability {
     TerminalResize,
     /// 读取环境变量等环境信息。
     EnvironmentInfo,
+    /// 只读文件内容（SFTP 等）。
+    FileRead,
 }
 
 impl Capability {
@@ -32,6 +34,7 @@ impl Capability {
             Self::PortForward => "port_forward",
             Self::TerminalResize => "terminal_resize",
             Self::EnvironmentInfo => "environment_info",
+            Self::FileRead => "file_read",
         }
     }
 }

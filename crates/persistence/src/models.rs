@@ -57,6 +57,8 @@ pub struct NewAuditEntry {
     pub connection_id: Option<ConnectionId>,
     pub kind: AuditKind,
     pub outcome: AuditOutcome,
+    pub tool_name: Option<String>,
+    pub permission: Option<umt_core::TokenPermission>,
     pub command: Option<String>,
     pub working_dir: Option<String>,
     pub started_at: UnixMillis,
