@@ -151,7 +151,7 @@ WSL Provider 用例需要本机真实 WSL 发行版，CI 上跳过属预期。
 
 ## 11. 已知限制
 
-- 支持 SSH/SFTP 只读文件下载；无 FTP/TFTP、无文件上传、无终端录制回放。
+- 支持 SSH/SFTP 与 WSL 的只读文件下载；无 FTP/TFTP、无文件上传、无终端录制回放。
 - MCP 通道无交互式高风险确认。
 - Telnet 未实现完整选项协商，提示符正则按设备调整。
 - WSL 能力仅 Windows。

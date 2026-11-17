@@ -11,7 +11,9 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use umt_core::{Capability, CapabilitySet, ExecutionState, SessionId};
 use umt_protocol_api::error::{ProviderError, SessionError};
-use umt_protocol_api::session::{ExecRequest, ExecResult, OutputChunk, TerminalSession};
+use umt_protocol_api::session::{
+    ExecRequest, ExecResult, FileChunk, FileReadRequest, OutputChunk, TerminalSession,
+};
 
 use crate::config::WslConfig;
 use crate::decode;
@@ -118,6 +120,58 @@ impl WslSession {
         // 关闭 Job 句柄：KILL_ON_JOB_CLOSE 会清掉仍挂在 Job 上的残留进程。
         self.job = None;
         self.child = None;
+    }
+
+    /// 在发行版内执行一条短脚本并捕获原始输出。
+    ///
+    /// 不走 `startup_args`（默认 `-lc`）：读取文件不需要登录 Shell，
+    /// 避免用户的 Shell 配置向 stdout 写入额外内容污染字节流。
+    async fn run_script(
+        &self,
+        script: &str,
+        max_output_bytes: usize,
+    ) -> Result<process::CommandOutcome, SessionError> {
+        let mut args = self.settings.base_args(None);
+        args.push("-c".to_string());
+        args.push(script.to_string());
+
+        let outcome = process::run_capture(WslCommand {
+            args,
+            env: self.settings.env.clone(),
+            timeout: self.settings.timeout,
+            max_output_bytes,
+        })
+        .await
+        .map_err(|error| SessionError::Io(format!("无法执行 wsl.exe：{error}")))?;
+
+        if outcome.timed_out {
+            return Err(SessionError::Timeout(format!(
+                "读取 WSL 文件超时（{} 秒）",
+                self.settings.timeout.as_secs()
+            )));
+        }
+        Ok(outcome)
+    }
+
+    /// 读取普通文件大小；路径不存在或不可读时返回带 stderr 的错误。
+    async fn remote_file_size(&self, path: &str) -> Result<u64, SessionError> {
+        let outcome = self
+            .run_script(&format!("wc -c < {}", shell_quote(path)), 64 * 1024)
+            .await?;
+        if outcome.exit_code != Some(0) {
+            let stderr = decode::decode_output(&outcome.stderr);
+            let stdout = decode::decode_output(&outcome.stdout);
+            let detail = if stderr.trim().is_empty() {
+                stdout.trim().to_string()
+            } else {
+                stderr.trim().to_string()
+            };
+            return Err(SessionError::Io(format!("打开 WSL 文件失败：{detail}")));
+        }
+        decode::decode_output(&outcome.stdout)
+            .trim()
+            .parse::<u64>()
+            .map_err(|_| SessionError::Internal("无法解析 WSL 文件大小".into()))
     }
 
     /// 测试用：子进程 PID，用于验证关闭后没有进程泄漏。
@@ -236,6 +290,55 @@ impl TerminalSession for WslSession {
             stderr: decode::decode_output(&outcome.stderr),
             duration_ms: outcome.duration.as_millis() as u64,
             truncated: outcome.truncated,
+        })
+    }
+
+    async fn read_file(&mut self, request: FileReadRequest) -> Result<FileChunk, SessionError> {
+        if self.closed {
+            return Err(SessionError::Closed);
+        }
+        if !self.capabilities.contains(Capability::FileRead) {
+            return Err(SessionError::UnsupportedCapability(Capability::FileRead));
+        }
+
+        let max_bytes = request.max_bytes.max(1);
+        let size = self.remote_file_size(&request.path).await?;
+
+        if request.offset > size {
+            return Ok(FileChunk {
+                path: request.path,
+                offset: request.offset,
+                next_offset: request.offset,
+                size: Some(size),
+                eof: true,
+                data: Vec::new(),
+            });
+        }
+
+        // tail 的 +N 从 1 开始计数；head 限制单次读取量，避免大文件整体进入内存。
+        let script = format!(
+            "tail -c +{} -- {} | head -c {}",
+            request.offset + 1,
+            shell_quote(&request.path),
+            max_bytes
+        );
+        let outcome = self.run_script(&script, max_bytes).await?;
+        if outcome.exit_code != Some(0) {
+            let detail = decode::decode_output(&outcome.stderr).trim().to_string();
+            return Err(SessionError::Io(format!("读取 WSL 文件失败：{detail}")));
+        }
+
+        let data = outcome.stdout;
+        let next_offset = request.offset + data.len() as u64;
+        let eof = next_offset >= size || data.len() < max_bytes;
+
+        Ok(FileChunk {
+            path: request.path,
+            offset: request.offset,
+            next_offset,
+            size: Some(size),
+            eof,
+            data,
         })
     }
 
@@ -379,6 +482,21 @@ where
     })
 }
 
+/// POSIX Shell 单引号转义，避免文件路径中的特殊字符被解释。
+fn shell_quote(value: &str) -> String {
+    let mut quoted = String::with_capacity(value.len() + 2);
+    quoted.push('\'');
+    for character in value.chars() {
+        if character == '\'' {
+            quoted.push_str("'\\''");
+        } else {
+            quoted.push(character);
+        }
+    }
+    quoted.push('\'');
+    quoted
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -403,6 +521,84 @@ mod tests {
     fn start_session(distribution: &str) -> WslSession {
         WslSession::spawn(capabilities(), session_config(distribution), 24, 80)
             .expect("应能启动 wsl.exe")
+    }
+
+    #[test]
+    fn shell_quote_escapes_single_quotes() {
+        assert_eq!(shell_quote("/tmp/a b"), "'/tmp/a b'");
+        assert_eq!(shell_quote("it's"), "'it'\\''s'");
+    }
+
+    /// 按字节分块读取，包含 NUL 时也不能被截断或转码。
+    #[tokio::test]
+    async fn read_file_returns_chunked_bytes() {
+        let Some(distribution) = test_distribution() else {
+            eprintln!("跳过：本机没有可用的 WSL 发行版");
+            return;
+        };
+        let mut session = start_session(&distribution);
+        let path = "/tmp/umt-wsl-read-file";
+
+        let written = session
+            .exec(ExecRequest::new(format!(
+                "printf 'umt-wsl\\000tail' > {path}"
+            )))
+            .await
+            .expect("写入测试文件失败");
+        assert_eq!(written.exit_code, Some(0), "写入失败：{}", written.stderr);
+
+        let first = session
+            .read_file(FileReadRequest::new(path, 0, 5))
+            .await
+            .expect("读取第一块失败");
+        assert_eq!(first.offset, 0);
+        assert_eq!(first.next_offset, 5);
+        assert_eq!(first.size, Some(12));
+        assert!(!first.eof);
+        assert_eq!(first.data, b"umt-w");
+
+        let second = session
+            .read_file(FileReadRequest::new(path, 5, 1024))
+            .await
+            .expect("读取第二块失败");
+        assert_eq!(second.offset, 5);
+        assert_eq!(second.next_offset, 12);
+        assert_eq!(second.size, Some(12));
+        assert!(second.eof);
+        assert_eq!(second.data, b"sl\0tail");
+
+        let beyond = session
+            .read_file(FileReadRequest::new(path, 100, 16))
+            .await
+            .expect("越界读取失败");
+        assert_eq!(beyond.offset, 100);
+        assert_eq!(beyond.next_offset, 100);
+        assert!(beyond.eof);
+        assert!(beyond.data.is_empty());
+
+        let _ = session
+            .exec(ExecRequest::new(format!("rm -f {path}")))
+            .await;
+        Box::new(session).close().await.expect("关闭失败");
+    }
+
+    #[tokio::test]
+    async fn read_file_reports_missing_file() {
+        let Some(distribution) = test_distribution() else {
+            eprintln!("跳过：本机没有可用的 WSL 发行版");
+            return;
+        };
+        let mut session = start_session(&distribution);
+        let error = session
+            .read_file(FileReadRequest::new("/nonexistent-umt-read-file", 0, 16))
+            .await
+            .unwrap_err();
+        Box::new(session).close().await.expect("关闭失败");
+
+        assert!(
+            error.to_string().contains("打开 WSL 文件失败"),
+            "缺失文件应返回明确错误，实际：{error}"
+        );
     }
 
     #[tokio::test]

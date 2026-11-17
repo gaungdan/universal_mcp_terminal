@@ -156,11 +156,11 @@ SessionManager::exec
 
 ### 3.3 Capability：只声明真实能力，不支持必须报错
 
-- 枚举：`shell`、`exec`、`interactive_terminal`、`device_information`、`port_forward`、`terminal_resize`、`environment_info`。
-- SSH 声明 Shell / Exec / InteractiveTerminal / TerminalResize。
+- 枚举：`shell`、`exec`、`interactive_terminal`、`device_information`、`port_forward`、`terminal_resize`、`environment_info`、`file_read`。
+- SSH 声明 Shell / Exec / InteractiveTerminal / TerminalResize / FileRead。
 - Telnet 声明 Shell / Exec / InteractiveTerminal（**不声明** TerminalResize）。
-- WSL 声明 Shell / Exec / InteractiveTerminal / TerminalResize / EnvironmentInfo。
-- MCP 层在调用前检查能力；`TerminalSession::exec` 与 `resize` 的默认实现返回 `UnsupportedCapability`，不会伪装成功。
+- WSL 声明 Shell / Exec / InteractiveTerminal / TerminalResize / EnvironmentInfo / FileRead。
+- MCP 层在调用前检查能力；`TerminalSession::exec`、`resize` 与 `read_file` 的默认实现返回 `UnsupportedCapability`，不会伪装成功。
 
 ### 3.4 Token 不落明文
 

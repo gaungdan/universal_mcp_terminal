@@ -131,6 +131,7 @@ impl WslProvider {
                     Capability::InteractiveTerminal,
                     Capability::TerminalResize,
                     Capability::EnvironmentInfo,
+                    Capability::FileRead,
                 ]),
             },
             schema: config::schema(&distributions),
@@ -328,6 +329,7 @@ mod tests {
             Capability::InteractiveTerminal,
             Capability::TerminalResize,
             Capability::EnvironmentInfo,
+            Capability::FileRead,
         ] {
             assert!(
                 descriptor.capabilities.contains(capability),
@@ -335,7 +337,7 @@ mod tests {
                 capability.as_str()
             );
         }
-        assert_eq!(descriptor.capabilities.len(), 5);
+        assert_eq!(descriptor.capabilities.len(), 6);
     }
 
     #[test]

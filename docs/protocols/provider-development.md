@@ -176,7 +176,7 @@ pub struct FieldValidation {
 3. 支持尺寸调整才声明 `TerminalResize`；Telnet 当前**不声明**，`resize_terminal` 返回 `unsupported_capability`。
 4. 交互式终端声明 `Shell` + `InteractiveTerminal`。
 5. 能力集合会被序列化为字符串数组，稳定标识见 `Capability::as_str()`：
-   `shell`、`exec`、`interactive_terminal`、`device_information`、`port_forward`、`terminal_resize`、`environment_info`。
+   `shell`、`exec`、`interactive_terminal`、`device_information`、`port_forward`、`terminal_resize`、`environment_info`、`file_read`。
 6. 不支持的能力必须明确报错：
    - MCP 层：`ensure_capability` → `UmtError::UnsupportedCapability`（`-32003`）；
    - 会话层：`SessionError::UnsupportedCapability`；
