@@ -1,0 +1,85 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build & Release (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    env:
+      # rust-toolchain.toml 固定了 GNU 工具链（本机没有 MSVC），
+      # GitHub runner 自带 MSVC 而没有 MinGW 链接器，因此覆盖为 MSVC。
+      RUSTUP_TOOLCHAIN: stable-x86_64-pc-windows-msvc
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: "0"
+      # 仓库 .cargo/config.toml 为省内存固定 jobs = 1；
+      # GitHub runner 内存充足，与 ci.yml 保持一致改为 2 并发。
+      CARGO_BUILD_JOBS: "2"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # tag 与安装包版本必须一致，避免发布出文件名版本与 tag 不符的产物。
+      - name: Verify tag matches app version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $config = Get-Content apps/desktop/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $expected = "v$($config.version)"
+          if ($tag -ne $expected) {
+            Write-Error "tag $tag 与 tauri.conf.json 版本不一致（期望 $expected）"
+            exit 1
+          }
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Install Rust (MSVC)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable-x86_64-pc-windows-msvc
+
+      - name: Cache Rust workspace
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "."
+
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: npm ci
+
+      # tauri-action 会执行 beforeBuildCommand（npm run build）、
+      # cargo build --release 与打包，并把产物上传到同名 Release。
+      - name: Build and publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: "Universal MCP Terminal ${{ github.ref_name }}"
+          releaseBody: |
+            Windows 安装包由 GitHub Actions 自动构建。
+
+            - 产物：MSI 与 NSIS 安装包
+            - 未做代码签名，首次运行时 Windows SmartScreen 可能提示
+          releaseDraft: false
+          prerelease: false
+          args: --bundles nsis,msi
