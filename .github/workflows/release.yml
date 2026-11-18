@@ -83,3 +83,27 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: --bundles nsis,msi
+
+      - name: Append SHA-256 checksums to release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $files = Get-ChildItem -Path "target/release/bundle" -Recurse -File -Include *.msi, *-setup.exe | Sort-Object Name
+          if ($files.Count -eq 0) {
+            Write-Error "未找到 MSI/NSIS 安装包"
+            exit 1
+          }
+
+          $block = "`n## SHA-256`n`n"
+          foreach ($file in $files) {
+            $hash = (Get-FileHash -Path $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            $block += "- $($file.Name): $hash`n"
+          }
+
+          $tag = "${{ github.ref_name }}"
+          $body = (gh release view $tag --json body --jq .body) -join "`n"
+          # 重跑时先移除旧的校验值章节，避免重复追加。
+          $body = $body -replace "(?s)\r?\n## SHA-256.*$", ""
+          ($body.TrimEnd() + $block) | Out-File -FilePath release-body.md -Encoding utf8
+          gh release edit $tag --notes-file release-body.md
