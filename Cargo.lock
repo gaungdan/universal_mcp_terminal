@@ -6007,7 +6007,7 @@ dependencies = [
 
 [[package]]
 name = "umt-access-control"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "thiserror 2.0.21",
@@ -6022,7 +6022,7 @@ dependencies = [
 
 [[package]]
 name = "umt-app"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6053,7 +6053,7 @@ dependencies = [
 
 [[package]]
 name = "umt-audit"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "hex",
@@ -6071,7 +6071,7 @@ dependencies = [
 
 [[package]]
 name = "umt-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "schemars 1.2.3",
  "serde",
@@ -6083,7 +6083,7 @@ dependencies = [
 
 [[package]]
 name = "umt-desktop"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -6097,7 +6097,7 @@ dependencies = [
 
 [[package]]
 name = "umt-mcp-server"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "axum",
  "base64 0.23.1",
@@ -6126,7 +6126,7 @@ dependencies = [
 
 [[package]]
 name = "umt-persistence"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "serde",
@@ -6142,7 +6142,7 @@ dependencies = [
 
 [[package]]
 name = "umt-protocol-api"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "regex",
@@ -6156,7 +6156,7 @@ dependencies = [
 
 [[package]]
 name = "umt-protocol-registry"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "parking_lot 0.13.0",
  "thiserror 2.0.21",
@@ -6167,7 +6167,7 @@ dependencies = [
 
 [[package]]
 name = "umt-provider-ssh"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -6187,7 +6187,7 @@ dependencies = [
 
 [[package]]
 name = "umt-provider-telnet"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "bytes",
@@ -6204,7 +6204,7 @@ dependencies = [
 
 [[package]]
 name = "umt-provider-wsl"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "bytes",
@@ -6220,7 +6220,7 @@ dependencies = [
 
 [[package]]
 name = "umt-security"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aes-gcm",
  "base64 0.23.1",
@@ -6239,7 +6239,7 @@ dependencies = [
 
 [[package]]
 name = "umt-session-manager"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "dashmap",
